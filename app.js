@@ -57,6 +57,7 @@
     id: r.id, title: r.title, notes: r.notes || "", projectId: r.project_id,
     priority: r.priority, status: r.status, due: r.due || "",
     source: r.source, requesterId: r.requester_id, needsAttention: !!r.needs_attention,
+    requesterName: r.requester_name || "", requesterDept: r.requester_department || "",
     created: r.created_at,
   });
   const rowFromTask = (t) => ({
@@ -124,24 +125,62 @@
   }
 
   // ---- Login form ----
+  let authMode = "password";   // "password" | "link"
+
+  document.querySelectorAll(".auth-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      document.querySelectorAll(".auth-tab").forEach((t) => t.classList.remove("active"));
+      tab.classList.add("active");
+      authMode = tab.dataset.mode;
+      const pw = authMode === "password";
+      $("passwordField").hidden = !pw;
+      $("authSubmit").textContent = pw ? "Sign in" : "Send me a login link";
+      $("authHint").textContent = pw
+        ? "Signing in keeps you logged in on this device — you won't need to do this every time."
+        : "We'll email you a one-time link. First time here? Use this, then set a password in the app.";
+      $("authMsg").hidden = true;
+    });
+  });
+
+  function authMsg(text, ok) {
+    const m = $("authMsg");
+    m.hidden = false;
+    m.className = "auth-msg " + (ok ? "ok" : "err");
+    m.textContent = text;
+  }
+
   $("authForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const email = $("authEmail").value.trim();
     if (!email) return;
     const btn = $("authSubmit");
-    btn.disabled = true; btn.textContent = "Sending…";
-    const { error } = await sb.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: location.href.split("#")[0] },
-    });
-    btn.disabled = false; btn.textContent = "Send me a login link";
-    const msg = $("authMsg");
-    msg.hidden = false;
-    if (error) { msg.className = "auth-msg err"; msg.textContent = error.message; }
-    else { msg.className = "auth-msg ok"; msg.textContent = `Check ${email} for your login link.`; }
+
+    if (authMode === "password") {
+      const password = $("authPassword").value;
+      if (!password) { authMsg("Enter your password, or use the Email link tab.", false); return; }
+      btn.disabled = true; btn.textContent = "Signing in…";
+      const { error } = await sb.auth.signInWithPassword({ email, password });
+      btn.disabled = false; btn.textContent = "Sign in";
+      if (error) authMsg(error.message + " — no password yet? Use the Email link tab, then set one in the app.", false);
+      // success -> onAuthStateChange handles entering the app
+    } else {
+      btn.disabled = true; btn.textContent = "Sending…";
+      const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.href.split("#")[0] } });
+      btn.disabled = false; btn.textContent = "Send me a login link";
+      if (error) authMsg(error.message, false);
+      else authMsg(`Check ${email} for your login link.`, true);
+    }
   });
 
   $("signOutBtn").addEventListener("click", async () => { await sb.auth.signOut(); });
+
+  $("setPwBtn").addEventListener("click", async () => {
+    const pw = prompt("Set a password for faster sign-in next time (at least 6 characters):");
+    if (pw == null) return;
+    if (pw.length < 6) { toast("Password must be at least 6 characters"); return; }
+    const { error } = await sb.auth.updateUser({ password: pw });
+    toast(error ? (error.message || "Could not set password") : "Password set — you can sign in with it next time");
+  });
 
   function renderAccount() {
     if (!me) return;
@@ -193,8 +232,11 @@
     } catch (e) { /* non-fatal */ }
   }
 
-  function requesterName(id) {
-    const p = profilesById[id];
+  // Label for who raised a request — a public submitter's name (+ department),
+  // or a logged-in requester's profile name.
+  function requesterLabel(t) {
+    if (t.requesterName) return t.requesterName + (t.requesterDept ? " · " + t.requesterDept : "");
+    const p = profilesById[t.requesterId];
     return p ? (p.name || p.email || "Someone") : "Someone";
   }
 
@@ -339,7 +381,7 @@
     return p ? `<span class="chip project-chip" style="--pc:${p.color}">${esc(p.name)}</span>` : "";
   }
 
-  const requestChip = (t) => t.source === "request" ? `<span class="chip request-chip">📨 ${esc(requesterName(t.requesterId))}</span>` : "";
+  const requestChip = (t) => t.source === "request" ? `<span class="chip request-chip">📨 ${esc(requesterLabel(t))}</span>` : "";
   const attentionChip = (t) => t.needsAttention ? `<span class="chip attention-chip">⚠ Needs attention</span>` : "";
 
   function cardMarkup(t) {
@@ -630,6 +672,31 @@
     });
   });
   searchInput.addEventListener("input", (e) => { query = e.target.value.trim().toLowerCase(); render(); });
+
+  // ---- Theme (light / dark) ----
+  function currentTheme() {
+    const set = document.documentElement.getAttribute("data-theme");
+    if (set) return set;
+    return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  function applyThemeLabel() {
+    const dark = currentTheme() === "dark";
+    const full = document.getElementById("themeToggle");
+    const mini = document.getElementById("themeToggle2");
+    if (full) full.textContent = dark ? "☀️ Light" : "🌙 Dark";
+    if (mini) mini.textContent = dark ? "☀️" : "🌙";
+  }
+  function toggleTheme() {
+    const next = currentTheme() === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem("tasktrack.theme", next); } catch (e) {}
+    applyThemeLabel();
+  }
+  ["themeToggle", "themeToggle2"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("click", toggleTheme);
+  });
+  applyThemeLabel();
 
   // ============================================================
   //  Export / Import (client-side backup of the current view of data)

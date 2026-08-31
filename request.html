@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Submit a request — TaskTrack</title>
+  <meta name="theme-color" content="#4f46e5" />
+  <link rel="icon" href="icons/favicon-32.png" sizes="32x32" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <script>
+    try {
+      var t = localStorage.getItem("tasktrack.theme");
+      if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {}
+  </script>
+</head>
+<body>
+  <div class="portal">
+    <header class="portal-top">
+      <div class="brand">
+        <div class="brand-mark">✓</div>
+        <div class="brand-text"><h1>TaskTrack</h1><span>Office requests</span></div>
+      </div>
+      <button class="ghost-btn theme-toggle" id="themeToggle" title="Toggle light/dark">🌙</button>
+    </header>
+
+    <div class="portal-body">
+      <section class="portal-new">
+        <h2>Request something</h2>
+        <p class="portal-hint">Log what you need. No account required — just add your name so it's clear who's asking. You can check the status here later on this device.</p>
+        <form id="requestForm">
+          <div class="field-row">
+            <label class="field">
+              <span>Your name</span>
+              <input type="text" id="rName" required placeholder="e.g. Ada Obi" autocomplete="name" />
+            </label>
+            <label class="field">
+              <span>Department (optional)</span>
+              <input type="text" id="rDept" placeholder="e.g. Finance" autocomplete="off" />
+            </label>
+          </div>
+          <label class="field">
+            <span>What do you need?</span>
+            <input type="text" id="rTitle" required placeholder="e.g. Approve the vendor contract" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>Details (optional)</span>
+            <textarea id="rNotes" rows="3" placeholder="Context, links, deadlines…"></textarea>
+          </label>
+          <div class="field-row">
+            <label class="field">
+              <span>Needed by (optional)</span>
+              <input type="date" id="rDue" />
+            </label>
+            <label class="field">
+              <span>Priority</span>
+              <select id="rPriority">
+                <option value="low">Low</option>
+                <option value="medium" selected>Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+          </div>
+          <button type="submit" class="primary-btn wide" id="rSubmit">Submit request</button>
+        </form>
+        <p class="auth-msg" id="rMsg" hidden></p>
+      </section>
+
+      <section class="portal-list" id="trackSection" hidden>
+        <h2>My requests (this device)</h2>
+        <div id="trackList"></div>
+      </section>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="supabase-config.js"></script>
+  <script src="request.js"></script>
+</body>
+</html>

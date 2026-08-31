@@ -1,11 +1,13 @@
 /* TaskTrack service worker — offline support.
    Bump CACHE version whenever the cached files change so clients update. */
-const CACHE = "tasktrack-v2";
+const CACHE = "tasktrack-v3";
 const ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
+  "./request.html",
+  "./request.js",
   "./supabase-config.js",
   "./vendor/supabase.js",
   "./manifest.webmanifest",

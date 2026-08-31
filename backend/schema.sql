@@ -65,7 +65,10 @@ create table public.tasks (
   status          task_status not null default 'pending',
   due             date,
   source          task_source not null default 'internal',
-  requester_id    uuid references public.profiles(id) on delete set null, -- who asked (portal)
+  requester_id    uuid references public.profiles(id) on delete set null, -- who asked (logged-in)
+  requester_name  text,                                -- who asked (public link, no account)
+  requester_department text,
+  track_token     uuid default gen_random_uuid(),      -- lets a public submitter check status
   created_by      uuid references public.profiles(id) on delete set null,
   needs_attention boolean not null default false,     -- set by a nudge / overdue job
   created_at      timestamptz not null default now(),
@@ -264,6 +267,19 @@ create policy tasks_insert_request on public.tasks for insert
     and status = 'pending'
   );
 
+-- Anonymous public request submissions (the shared office link). Insert only.
+create policy tasks_insert_public on public.tasks for insert to anon
+  with check (
+    source = 'request'
+    and requester_id is null
+    and created_by is null
+    and status = 'pending'
+    and project_id is null
+    and requester_name is not null
+    and char_length(requester_name) between 1 and 120
+    and char_length(coalesce(title, '')) between 1 and 300
+  );
+
 create policy tasks_update_staff on public.tasks for update
   using (public.can_edit()) with check (public.can_edit());
 
@@ -292,6 +308,17 @@ create policy push_own on public.push_subscriptions for all
 -- reminders: staff (editor+) manage reminders.
 create policy reminders_staff on public.reminders for all
   using (public.can_edit()) with check (public.can_edit());
+
+-- ---------- Public request status lookup (by token, for anon submitters) ----------
+create or replace function public.public_request_status(token uuid)
+returns table (title text, status task_status, created_at timestamptz, needs_attention boolean)
+language sql security definer set search_path = public as $$
+  select title, status, created_at, needs_attention
+    from public.tasks
+   where track_token = token and source = 'request'
+   limit 1;
+$$;
+grant execute on function public.public_request_status(uuid) to anon, authenticated;
 
 -- ---------- Enable realtime (live cross-device sync) ----------
 -- Adds these tables to Supabase's realtime publication so the app receives

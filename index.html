@@ -20,6 +20,13 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
+  <script>
+    // Apply the saved theme before paint to avoid a flash.
+    try {
+      var t = localStorage.getItem("tasktrack.theme");
+      if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {}
+  </script>
 </head>
 <body>
   <!-- Boot spinner (shown until we know if you're signed in) -->
@@ -38,15 +45,24 @@
           <span>Sign in to sync across your devices</span>
         </div>
       </div>
+      <div class="auth-tabs">
+        <button class="auth-tab active" data-mode="password" type="button">Password</button>
+        <button class="auth-tab" data-mode="link" type="button">Email link</button>
+      </div>
+
       <form id="authForm" class="auth-form">
         <label class="field">
           <span>Your email</span>
           <input type="email" id="authEmail" required placeholder="you@example.com" autocomplete="email" />
         </label>
-        <button type="submit" class="primary-btn wide" id="authSubmit">Send me a login link</button>
+        <label class="field" id="passwordField">
+          <span>Password</span>
+          <input type="password" id="authPassword" placeholder="Your password" autocomplete="current-password" />
+        </label>
+        <button type="submit" class="primary-btn wide" id="authSubmit">Sign in</button>
       </form>
       <p class="auth-msg" id="authMsg" hidden></p>
-      <p class="auth-hint">No password needed — we email you a secure one-time link.</p>
+      <p class="auth-hint" id="authHint">Signing in keeps you logged in on this device — you won't need to do this every time.</p>
     </div>
   </div>
 
@@ -59,6 +75,7 @@
       </div>
       <div class="portal-account">
         <span class="account-email" id="portalEmail"></span>
+        <button class="ghost-btn theme-toggle" id="themeToggle2" title="Toggle light/dark">🌙</button>
         <button class="ghost-btn" id="portalSignOut">Sign out</button>
       </div>
     </header>
@@ -140,6 +157,7 @@
       </nav>
 
       <div class="sidebar-footer">
+        <button class="ghost-btn notif-btn" id="setPwBtn" title="Set or change your password for faster sign-in">🔑 Set a password</button>
         <button class="ghost-btn notif-btn" id="notifBtn" hidden title="Get notified on this device">🔔 Enable notifications</button>
         <div class="account" id="account" hidden>
           <div class="account-avatar" id="accountAvatar">?</div>
@@ -154,6 +172,7 @@
           <button class="ghost-btn" id="importBtn" title="Restore tasks from a backup file">⬆ Import</button>
           <input type="file" id="importFile" accept="application/json" hidden />
         </div>
+        <button class="ghost-btn theme-toggle" id="themeToggle" title="Toggle light/dark">🌙 Dark</button>
       </div>
     </aside>
 

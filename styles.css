@@ -29,8 +29,10 @@
   --radius: 12px;
 }
 
+/* Dark palette. Applied when the viewer's system prefers dark AND they haven't
+   forced light, or when they've explicitly chosen dark via the toggle. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --c-bg: #0f1117;
     --c-surface: #181b23;
     --c-surface-2: #1f232d;
@@ -43,6 +45,19 @@
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, .3);
     --shadow-md: 0 6px 18px rgba(0, 0, 0, .45);
   }
+}
+:root[data-theme="dark"] {
+  --c-bg: #0f1117;
+  --c-surface: #181b23;
+  --c-surface-2: #1f232d;
+  --c-border: #2a2f3a;
+  --c-text: #e8eaed;
+  --c-text-soft: #9aa1ad;
+  --c-text-faint: #6b7280;
+  --c-accent: #7c7bff;
+  --c-accent-soft: #21243b;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .3);
+  --shadow-md: 0 6px 18px rgba(0, 0, 0, .45);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -93,6 +108,9 @@ body {
 .brand.center { flex-direction: column; text-align: center; gap: 12px; }
 .brand.center .brand-text h1 { font-size: 22px; }
 .brand.center .brand-text span { font-size: 13px; }
+.auth-tabs { display: flex; background: var(--c-bg); border-radius: 9px; padding: 3px; }
+.auth-tab { flex: 1; border: none; background: transparent; cursor: pointer; padding: 8px; border-radius: 7px; font-size: 13px; font-weight: 600; color: var(--c-text-soft); font-family: inherit; }
+.auth-tab.active { background: var(--c-surface); color: var(--c-text); box-shadow: var(--shadow-sm); }
 .auth-form { display: flex; flex-direction: column; gap: 14px; }
 .primary-btn.wide { width: 100%; padding: 11px; }
 .auth-msg { font-size: 13px; padding: 10px 12px; border-radius: 8px; margin: 0; }
@@ -115,6 +133,8 @@ body {
 .footer-actions { display: flex; gap: 8px; }
 .upload-text { font-size: 14px; color: var(--c-text-soft); line-height: 1.5; margin: 0 0 4px; }
 .notif-btn { width: 100%; margin-bottom: 10px; }
+.theme-toggle { width: 100%; margin-top: 8px; }
+.portal-account .theme-toggle, .portal-top .theme-toggle { width: auto; margin-top: 0; }
 
 /* ===== Request / attention badges ===== */
 .chip.request-chip { background: rgba(14,165,233,.14); color: #0284c7; }
