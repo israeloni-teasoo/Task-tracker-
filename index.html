@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TaskTrack — Personal Task & Todo Tracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- ===== Sidebar ===== -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">✓</div>
+        <div class="brand-text">
+          <h1>TaskTrack</h1>
+          <span>Your day, sorted.</span>
+        </div>
+      </div>
+
+      <nav class="filters" aria-label="Filters">
+        <p class="filters-label">Views</p>
+        <button class="filter-btn active" data-scope="all">
+          <span class="dot" style="background:var(--c-accent)"></span> All tasks
+          <span class="count" data-count="all">0</span>
+        </button>
+        <button class="filter-btn" data-scope="work">
+          <span class="dot" style="background:#3b82f6"></span> Work
+          <span class="count" data-count="work">0</span>
+        </button>
+        <button class="filter-btn" data-scope="personal">
+          <span class="dot" style="background:#a855f7"></span> Personal
+          <span class="count" data-count="personal">0</span>
+        </button>
+        <button class="filter-btn" data-scope="today">
+          <span class="dot" style="background:#f59e0b"></span> Due today
+          <span class="count" data-count="today">0</span>
+        </button>
+        <button class="filter-btn" data-scope="overdue">
+          <span class="dot" style="background:#ef4444"></span> Overdue
+          <span class="count" data-count="overdue">0</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button class="ghost-btn" id="exportBtn" title="Download a backup of all your tasks">⬇ Export</button>
+        <button class="ghost-btn" id="importBtn" title="Restore tasks from a backup file">⬆ Import</button>
+        <input type="file" id="importFile" accept="application/json" hidden />
+      </div>
+    </aside>
+
+    <!-- ===== Main ===== -->
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-left">
+          <h2 id="viewTitle">All tasks</h2>
+          <div class="view-toggle" role="tablist" aria-label="Layout">
+            <button class="toggle-btn active" data-view="board" role="tab">▦ Board</button>
+            <button class="toggle-btn" data-view="list" role="tab">☰ List</button>
+          </div>
+        </div>
+        <div class="topbar-right">
+          <div class="search-wrap">
+            <span class="search-icon">⌕</span>
+            <input type="search" id="search" placeholder="Search tasks…" aria-label="Search tasks" />
+          </div>
+          <button class="primary-btn" id="newTaskBtn">＋ New task</button>
+        </div>
+      </header>
+
+      <!-- Board view -->
+      <section id="boardView" class="board" aria-label="Board view"></section>
+
+      <!-- List view -->
+      <section id="listView" class="list-view" aria-label="List view" hidden></section>
+    </main>
+  </div>
+
+  <!-- ===== Task modal ===== -->
+  <div class="modal-overlay" id="modalOverlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-head">
+        <h3 id="modalTitle">New task</h3>
+        <button class="icon-btn" id="closeModal" aria-label="Close">✕</button>
+      </div>
+      <form id="taskForm" class="modal-body">
+        <input type="hidden" id="taskId" />
+        <label class="field">
+          <span>Title</span>
+          <input type="text" id="fTitle" required placeholder="e.g. Prepare board meeting deck" autocomplete="off" />
+        </label>
+        <label class="field">
+          <span>Notes</span>
+          <textarea id="fNotes" rows="3" placeholder="Any details, links or context…"></textarea>
+        </label>
+        <div class="field-row">
+          <label class="field">
+            <span>Category</span>
+            <select id="fCategory">
+              <option value="work">Work</option>
+              <option value="personal">Personal</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Priority</span>
+            <select id="fPriority">
+              <option value="low">Low</option>
+              <option value="medium" selected>Medium</option>
+              <option value="high">High</option>
+            </select>
+          </label>
+        </div>
+        <div class="field-row">
+          <label class="field">
+            <span>Status</span>
+            <select id="fStatus">
+              <option value="pending">Pending</option>
+              <option value="inprogress">In progress</option>
+              <option value="blocked">Blocked</option>
+              <option value="onhold">On hold</option>
+              <option value="completed">Completed</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Due date</span>
+            <input type="date" id="fDue" />
+          </label>
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="danger-btn" id="deleteTask" hidden>Delete</button>
+          <div class="spacer"></div>
+          <button type="button" class="ghost-btn" id="cancelTask">Cancel</button>
+          <button type="submit" class="primary-btn">Save task</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
