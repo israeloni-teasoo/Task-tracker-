@@ -85,23 +85,42 @@
           <div class="request-title">${esc(r.title)}</div>
           <div class="request-meta"><span class="status-badge s-pending" data-status>Checking…</span></div>
         </div>
+        <button class="ghost-btn nudge-btn" data-nudge="${esc(r.token)}" disabled>Nudge</button>
       </div>`).join("");
+
+    box.querySelectorAll("[data-nudge]").forEach((b) => b.addEventListener("click", () => nudge(b.dataset.nudge, b)));
 
     // Look up live status for each token via the security-definer RPC.
     for (const r of list) {
       try {
         const { data } = await sb.rpc("public_request_status", { token: r.token });
         const rec = Array.isArray(data) ? data[0] : data;
-        const row = box.querySelector(`[data-token="${cssEsc(r.token)}"] [data-status]`);
-        if (!row) continue;
+        const rowEl = box.querySelector(`[data-token="${cssEsc(r.token)}"]`);
+        if (!rowEl) continue;
+        const badge = rowEl.querySelector("[data-status]");
+        const nudgeBtn = rowEl.querySelector("[data-nudge]");
         if (rec) {
-          row.textContent = STATUS_LABEL[rec.status] || rec.status;
-          row.className = "status-badge s-" + rec.status;
+          badge.textContent = STATUS_LABEL[rec.status] || rec.status;
+          badge.className = "status-badge s-" + rec.status;
+          if (nudgeBtn) nudgeBtn.disabled = rec.status === "completed";   // can't nudge a done request
+          if (rec.needs_attention && nudgeBtn) nudgeBtn.textContent = "Nudged";
         } else {
-          row.textContent = "Not found";
+          badge.textContent = "Not found";
         }
       } catch (e) { /* leave as checking */ }
     }
+  }
+
+  async function nudge(token, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = "Nudging…"; }
+    const { data, error } = await sb.rpc("public_nudge", { token });
+    if (error || data === false) {
+      if (btn) { btn.disabled = false; btn.textContent = "Nudge"; }
+      msg(error ? (error.message || "Could not nudge") : "That request can't be nudged.", true);
+      return;
+    }
+    if (btn) btn.textContent = "Nudged";
+    msg("👍 Nudge sent — they'll see it flagged.", false);
   }
 
   function esc(s) {

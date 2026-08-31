@@ -762,6 +762,34 @@
   $("mImportBtn").addEventListener("click", () => { closeSheet(); $("importFile").click(); });
   $("mSignOutBtn").addEventListener("click", async () => { await sb.auth.signOut(); });
 
+  // ---- Refresh (manual + automatic) ----
+  // Realtime should push new requests live, but mobile connections drop; so we
+  // also refetch on focus/visibility, poll periodically, and offer a button.
+  let refreshing = false;
+  async function reloadData(silent) {
+    if (!appReady || !me || refreshing) return;
+    refreshing = true;
+    document.querySelectorAll("#refreshBtn, #portalRefresh").forEach((b) => b.classList.add("spinning"));
+    try {
+      if (myRole === "requester") { await loadTasks(); renderRequests(); }
+      else { await Promise.all([loadTasks(), loadProjects()]); saveCache(); render(); }
+      if (!silent) toast("Refreshed");
+    } catch (e) {
+      if (!silent) toast("Couldn't refresh — check your connection");
+    } finally {
+      refreshing = false;
+      document.querySelectorAll("#refreshBtn, #portalRefresh").forEach((b) => b.classList.remove("spinning"));
+    }
+  }
+  ["refreshBtn", "portalRefresh"].forEach((id) => {
+    const el = $(id);
+    if (el) el.addEventListener("click", () => reloadData(false));
+  });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") reloadData(true); });
+  window.addEventListener("focus", () => reloadData(true));
+  window.addEventListener("online", () => reloadData(true));
+  setInterval(() => { if (document.visibilityState === "visible") reloadData(true); }, 45000);
+
   // ============================================================
   //  Export / Import (client-side backup of the current view of data)
   // ============================================================

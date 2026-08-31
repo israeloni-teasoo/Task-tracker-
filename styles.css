@@ -97,6 +97,7 @@ body {
   animation: spin .7s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+.spinning { animation: spin .8s linear infinite; }
 
 /* ===== Auth screen ===== */
 .auth-screen { position: fixed; inset: 0; display: grid; place-items: center; padding: 20px; background: var(--c-bg); }
@@ -485,6 +486,7 @@ body {
 
 /* ===== Responsive ===== */
 .theme-top { font-size: 17px; }
+.refresh-btn { font-size: 17px; }   /* stays visible on mobile (unlike .theme-top) */
 
 /* ===== Mobile bottom navigation + sheet (shown only on small screens) ===== */
 .mobile-nav { display: none; }
@@ -561,6 +563,12 @@ body {
   .topbar-right { flex-basis: 100%; }
 
   /* List rows: keep the title readable, wrap the chips onto their own line. */
-  .list-row { flex-wrap: wrap; }
-  .list-meta { flex-basis: 100%; margin-left: 34px; margin-top: 6px; flex-wrap: wrap; }
+  .list-row { flex-wrap: wrap; gap: 12px; }
+  .list-meta { flex-basis: 100%; margin-left: 42px; margin-top: 6px; flex-wrap: wrap; }
+
+  /* Bigger, easy-to-tap complete checkbox on touch screens. */
+  .list-check {
+    width: 30px; height: 30px; font-size: 16px; border-radius: 9px;
+    touch-action: manipulation;
+  }
 }
