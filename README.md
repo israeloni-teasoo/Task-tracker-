@@ -15,11 +15,26 @@ learning curve.
 
 ## How to use it
 
-1. Open **`index.html`** in any modern web browser (Chrome, Edge, Safari, Firefox).
-2. That's it — start adding tasks with the **＋ New task** button.
+**Hosted (recommended):** once GitHub Pages finishes deploying, the app is live at:
 
-To keep a shortcut handy, bookmark the file or add it to the home screen /
-taskbar. It works completely offline.
+> **https://israeloni-teasoo.github.io/Task-tracker-/**
+
+Open that link in any modern browser and start adding tasks with **＋ New task**.
+
+**Or offline/local:** open **`index.html`** directly in a browser — it still works
+(the installable-app and offline features just need the hosted link).
+
+### Install it as an app (free — no App Store, no cost)
+
+It's a **PWA**, so it installs to the home screen and runs full-screen like a
+native app, on phones and computers:
+
+- **iPhone / iPad (Safari):** open the link → tap **Share** ⬆️ → **Add to Home Screen**.
+- **Samsung / Android (Chrome):** open the link → menu **⋮** → **Add to Home screen** / **Install app**.
+- **Desktop (Chrome/Edge):** click the **install** icon in the address bar.
+
+After installing, it opens from its own icon and **works offline** — no internet
+needed to view or edit tasks.
 
 ### Everyday actions
 
@@ -51,13 +66,17 @@ nothing is sent anywhere, and there is no server. Because it's per-browser:
 ## Project structure
 
 ```
-index.html   — markup / layout
-styles.css   — styling (light + dark, responsive)
-app.js       — all behaviour (state, board, list, drag & drop, storage)
+index.html                    — markup / layout
+styles.css                    — styling (light + dark, responsive)
+app.js                        — all behaviour (state, board, list, drag & drop, storage)
+manifest.webmanifest          — PWA metadata (name, icons, colours)
+sw.js                         — service worker (offline support)
+icons/                        — app icons
+.github/workflows/deploy.yml  — auto-deploy to GitHub Pages
 ```
 
-No build step, no dependencies, no framework — just three files. Edit and
-refresh.
+No build step, no dependencies, no framework. Edit and refresh; pushing to the
+default branch redeploys the hosted site automatically.
 
 ## Ideas for later
 
