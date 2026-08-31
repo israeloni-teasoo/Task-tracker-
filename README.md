@@ -72,12 +72,15 @@ Requester) — see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Public office request link
 
-Share **`/request.html`** (e.g. `https://<your-project>.vercel.app/request.html`)
-with the office. Anyone can submit a request with their **name** and optional
-**department** — no account needed — and it appears on the boss's board tagged
-with who asked. Submitters can check the status of their own requests from the
-same device. (Backed by an insert-only anon policy; see
-`backend/migrations/006_public_requests.sql`.)
+Share **`/office`** with the office — e.g.
+**`https://mp-office.teasooconsulting.com/office`**. Anyone can submit a request
+with their **name** and optional **department** — no account needed — and it
+appears on the boss's board tagged with who asked. Submitters can check the
+status of their own requests from the same device. (Backed by an insert-only
+anon policy; see `backend/migrations/006_public_requests.sql`.)
+
+`/office` is a Vercel rewrite to `request.html` (see `vercel.json`); the page
+also still works at `/request.html` directly.
 
 ## Appearance
 
