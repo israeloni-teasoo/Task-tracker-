@@ -32,12 +32,26 @@ create table public.memberships (
   created_at timestamptz not null default now()
 );
 
+-- Projects group tasks (e.g. "Work", "Personal", "Board of Directors").
+-- Shared across the workspace; staff (editor+) manage them.
+create table public.projects (
+  id         uuid primary key default gen_random_uuid(),
+  name       text not null,
+  color      text not null default '#3b82f6',
+  is_default boolean not null default false,
+  position   int not null default 0,
+  created_by uuid references public.profiles(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+-- At most one default project.
+create unique index projects_one_default on public.projects(is_default) where is_default;
+
 -- Tasks (internal) and office requests (source = 'request') share one table.
 create table public.tasks (
   id              uuid primary key default gen_random_uuid(),
   title           text not null,
   notes           text not null default '',
-  category        text not null default 'work',      -- 'work' | 'personal'
+  project_id      uuid references public.projects(id) on delete set null,
   priority        task_priority not null default 'medium',
   status          task_status not null default 'pending',
   due             date,
@@ -160,6 +174,7 @@ create trigger tasks_touch before update on public.tasks
 -- ============================================================================
 alter table public.profiles           enable row level security;
 alter table public.memberships         enable row level security;
+alter table public.projects            enable row level security;
 alter table public.tasks               enable row level security;
 alter table public.task_events         enable row level security;
 alter table public.push_subscriptions  enable row level security;
@@ -176,6 +191,12 @@ create policy memberships_select on public.memberships for select
   using (user_id = auth.uid() or public.is_staff());
 create policy memberships_write on public.memberships for all
   using (public.is_owner()) with check (public.is_owner());
+
+-- projects: any signed-in person may read; staff (editor+) manage them.
+create policy projects_select on public.projects for select
+  using (auth.uid() is not null);
+create policy projects_write on public.projects for all
+  using (public.can_edit()) with check (public.can_edit());
 
 -- tasks:
 --   read  -> staff see all; a requester sees only their own requests
@@ -224,6 +245,12 @@ create policy push_own on public.push_subscriptions for all
 -- reminders: staff (editor+) manage reminders.
 create policy reminders_staff on public.reminders for all
   using (public.can_edit()) with check (public.can_edit());
+
+-- ---------- Seed the starter projects ----------
+insert into public.projects (name, color, is_default, position) values
+  ('Work',     '#3b82f6', true,  0),
+  ('Personal', '#a855f7', false, 1)
+on conflict do nothing;
 
 -- ============================================================================
 --  One-time bootstrap: make the boss the Owner

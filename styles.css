@@ -93,6 +93,29 @@ body {
   font-size: 11px; text-transform: uppercase; letter-spacing: .6px;
   color: var(--c-text-faint); font-weight: 600; padding: 0 8px 6px;
 }
+.filters-label.with-action {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 8px 6px;
+}
+.mini-btn {
+  border: none; background: transparent; cursor: pointer;
+  color: var(--c-text-faint); font-size: 16px; line-height: 1;
+  padding: 2px 6px; border-radius: 6px; font-family: inherit;
+}
+.mini-btn:hover { background: var(--c-surface-2); color: var(--c-accent); }
+
+.project-list { display: flex; flex-direction: column; gap: 2px; }
+.project-row { display: flex; align-items: center; }
+.project-row .project-btn { flex: 1; min-width: 0; }
+.project-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-edit {
+  border: none; background: transparent; cursor: pointer;
+  color: var(--c-text-faint); font-size: 15px; line-height: 1;
+  padding: 4px 8px; border-radius: 6px; font-family: inherit;
+  opacity: 0; transition: opacity .12s;
+}
+.project-row:hover .row-edit { opacity: 1; }
+.row-edit:hover { background: var(--c-surface-2); color: var(--c-text); }
 .filter-btn {
   display: flex; align-items: center; gap: 10px;
   border: none; background: transparent; cursor: pointer;
@@ -233,8 +256,14 @@ body {
   font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 20px;
   display: inline-flex; align-items: center; gap: 4px;
 }
-.chip.cat-work { background: rgba(59, 130, 246, .12); color: #3b82f6; }
-.chip.cat-personal { background: rgba(168, 85, 247, .12); color: #a855f7; }
+.chip.project-chip {
+  background: color-mix(in srgb, var(--pc) 15%, transparent);
+  color: var(--pc);
+}
+/* Fallback for browsers without color-mix support. */
+@supports not (color: color-mix(in srgb, red, blue)) {
+  .chip.project-chip { background: var(--c-bg); color: var(--pc); }
+}
 .chip.due { background: var(--c-bg); color: var(--c-text-soft); }
 .chip.due.overdue { background: rgba(239, 68, 68, .12); color: var(--s-blocked); }
 .chip.due.today { background: rgba(245, 158, 11, .14); color: #d97706; }
@@ -311,6 +340,14 @@ body {
   outline: none; border-color: var(--c-accent); background: var(--c-surface);
 }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.modal-sm { max-width: 380px; }
+.swatches { display: flex; gap: 8px; flex-wrap: wrap; }
+.swatch {
+  width: 28px; height: 28px; border-radius: 8px; cursor: pointer;
+  border: 2px solid transparent; padding: 0;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.08);
+}
+.swatch.sel { border-color: var(--c-text); }
 .modal-foot { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
 .modal-foot .spacer { flex: 1; }
 
