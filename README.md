@@ -66,17 +66,29 @@ nothing is sent anywhere, and there is no server. Because it's per-browser:
 ## Project structure
 
 ```
-index.html                    — markup / layout
-styles.css                    — styling (light + dark, responsive)
-app.js                        — all behaviour (state, board, list, drag & drop, storage)
-manifest.webmanifest          — PWA metadata (name, icons, colours)
-sw.js                         — service worker (offline support)
-icons/                        — app icons
-.github/workflows/deploy.yml  — auto-deploy to GitHub Pages
+index.html            — markup / layout
+styles.css            — styling (light + dark, responsive)
+app.js                — all behaviour (state, board, list, drag & drop, storage)
+manifest.webmanifest  — PWA metadata (name, icons, colours)
+sw.js                 — service worker (offline support)
+icons/                — app icons
+.nojekyll             — serve files as-is on GitHub Pages
 ```
 
 No build step, no dependencies, no framework. Edit and refresh; pushing to the
 default branch redeploys the hosted site automatically.
+
+## Hosting (one-time setup)
+
+The site is served by **GitHub Pages**. To turn it on (once):
+
+1. Go to the repo **Settings → Pages**.
+2. Under **Build and deployment → Source**, choose **Deploy from a branch**.
+3. Set **Branch** to `claude/internal-task-tracker-43ehtk` and folder **`/ (root)`**, then **Save**.
+
+Within ~1 minute the app is live at
+**https://israeloni-teasoo.github.io/Task-tracker-/**, and every future push to
+that branch republishes it automatically.
 
 ## Ideas for later
 
