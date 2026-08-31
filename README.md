@@ -90,9 +90,16 @@ Within ~1 minute the app is live at
 **https://israeloni-teasoo.github.io/Task-tracker-/**, and every future push to
 that branch republishes it automatically.
 
+## Roadmap: multi-user, sync, roles & office portal
+
+The next phase turns TaskTrack into a shared system with logins, roles &
+permissions, cross-device sync, an office request portal, and push
+notifications/reminders — all on free infrastructure (Supabase + GitHub Pages).
+
+- **Design & permission model:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- **Database schema & security policies:** [`backend/schema.sql`](backend/schema.sql)
+
 ## Ideas for later
 
-- Recurring tasks and reminders
+- Recurring tasks
 - Subtasks / checklists inside a task
-- Sync across devices (would need a small backend)
-- Sharing a board with a PA / assistant
