@@ -1,6 +1,6 @@
 /* TaskTrack service worker — offline support.
    Bump CACHE version whenever the cached files change so clients update. */
-const CACHE = "tasktrack-v3";
+const CACHE = "tasktrack-v4";
 const ASSETS = [
   "./",
   "./index.html",

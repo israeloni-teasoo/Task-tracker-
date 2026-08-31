@@ -484,17 +484,83 @@ body {
 }
 
 /* ===== Responsive ===== */
+.theme-top { font-size: 17px; }
+
+/* ===== Mobile bottom navigation + sheet (shown only on small screens) ===== */
+.mobile-nav { display: none; }
+.sheet-overlay { display: none; }
+
 @media (max-width: 760px) {
+  /* Single column, no sidebar — a real app shell with a bottom tab bar. */
   .app { grid-template-columns: 1fr; }
-  .sidebar {
-    flex-direction: row; align-items: center; overflow-x: auto;
-    padding: 12px; gap: 12px;
-  }
-  .brand-text, .filters-label, .sidebar-footer { display: none; }
-  .filters { flex-direction: row; }
-  .filter-btn { white-space: nowrap; }
-  .filter-btn .count { display: none; }
-  .topbar { padding: 12px 16px; }
-  #search { width: 140px; }
+  .sidebar { display: none; }
+  .topbar { padding: 10px 14px; }
+  #viewTitle { font-size: 18px; }
+  .theme-top, #newTaskBtn { display: none; }   /* handled by the bottom nav */
+  #search { width: 100%; }
+  .search-wrap { flex: 1; }
+  .topbar-right { flex: 1; }
   .field-row { grid-template-columns: 1fr; }
+
+  /* keep content clear of the fixed bottom bar */
+  .board, .list-view { padding-bottom: 86px; }
+  .board { padding-left: 14px; padding-right: 14px; }
+  .list-view { padding-left: 14px; padding-right: 14px; }
+
+  .mobile-nav {
+    display: flex; align-items: center; justify-content: space-around;
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    height: 62px; padding-bottom: env(safe-area-inset-bottom, 0);
+    background: var(--c-surface); border-top: 1px solid var(--c-border);
+    box-shadow: 0 -2px 10px rgba(16,24,40,.06);
+  }
+  .mnav-btn {
+    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
+    border: none; background: transparent; cursor: pointer; font-family: inherit;
+    color: var(--c-text-faint); padding: 8px 0; position: relative;
+  }
+  .mnav-btn.active { color: var(--c-accent); }
+  .mnav-ico { font-size: 19px; line-height: 1; }
+  .mnav-label { font-size: 10.5px; font-weight: 600; }
+  .mnav-badge {
+    position: absolute; top: 2px; right: 24%; background: var(--s-blocked); color: #fff;
+    font-size: 9px; font-weight: 700; min-width: 15px; height: 15px; border-radius: 10px;
+    display: grid; place-items: center; padding: 0 3px;
+  }
+  .mnav-fab {
+    flex: none; width: 54px; height: 54px; border-radius: 50%; border: none; cursor: pointer;
+    background: var(--c-accent); color: #fff; font-size: 26px; font-weight: 400;
+    margin-top: -22px; box-shadow: var(--shadow-md); font-family: inherit;
+  }
+
+  /* Bottom sheet ("More") */
+  .sheet-overlay {
+    display: block; position: fixed; inset: 0; z-index: 60;
+    background: rgba(16,24,40,.5); backdrop-filter: blur(2px);
+  }
+  .sheet-overlay[hidden] { display: none; }
+  .sheet {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    background: var(--c-surface); border-radius: 18px 18px 0 0;
+    padding: 8px 16px calc(20px + env(safe-area-inset-bottom, 0));
+    max-height: 82vh; overflow-y: auto; animation: sheetUp .2s ease;
+  }
+  @keyframes sheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+  .sheet-handle { width: 40px; height: 4px; border-radius: 3px; background: var(--c-border); margin: 6px auto 14px; }
+  .sheet-section { margin-bottom: 14px; }
+  .sheet-row-head {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 11px; text-transform: uppercase; letter-spacing: .5px;
+    color: var(--c-text-faint); font-weight: 700; padding: 0 4px 8px;
+  }
+  .sheet-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .sheet-actions .ghost-btn { text-align: left; }
+
+  /* Search gets its own row so it isn't cramped next to the view toggle. */
+  .topbar-left { flex: 1; }
+  .topbar-right { flex-basis: 100%; }
+
+  /* List rows: keep the title readable, wrap the chips onto their own line. */
+  .list-row { flex-wrap: wrap; }
+  .list-meta { flex-basis: 100%; margin-left: 34px; margin-top: 6px; flex-wrap: wrap; }
 }

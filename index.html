@@ -75,7 +75,7 @@
       </div>
       <div class="portal-account">
         <span class="account-email" id="portalEmail"></span>
-        <button class="ghost-btn theme-toggle" id="themeToggle2" title="Toggle light/dark">🌙</button>
+        <button class="ghost-btn theme-toggle js-theme-toggle" title="Toggle light/dark">🌙</button>
         <button class="ghost-btn" id="portalSignOut">Sign out</button>
       </div>
     </header>
@@ -172,7 +172,6 @@
           <button class="ghost-btn" id="importBtn" title="Restore tasks from a backup file">⬆ Import</button>
           <input type="file" id="importFile" accept="application/json" hidden />
         </div>
-        <button class="ghost-btn theme-toggle" id="themeToggle" title="Toggle light/dark">🌙 Dark</button>
       </div>
     </aside>
 
@@ -191,6 +190,7 @@
             <span class="search-icon">⌕</span>
             <input type="search" id="search" placeholder="Search tasks…" aria-label="Search tasks" />
           </div>
+          <button class="icon-btn theme-top js-theme-toggle" title="Toggle light/dark" aria-label="Toggle light/dark">🌙</button>
           <button class="primary-btn" id="newTaskBtn">＋ New task</button>
         </div>
       </header>
@@ -201,6 +201,24 @@
       <!-- List view -->
       <section id="listView" class="list-view" aria-label="List view"></section>
     </main>
+
+    <!-- ===== Mobile bottom navigation ===== -->
+    <nav class="mobile-nav" id="mobileNav" aria-label="Primary">
+      <button class="mnav-btn active" data-mscope="all">
+        <span class="mnav-ico">🗒️</span><span class="mnav-label">Tasks</span>
+      </button>
+      <button class="mnav-btn" data-mscope="today">
+        <span class="mnav-ico">📅</span><span class="mnav-label">Today</span>
+      </button>
+      <button class="mnav-fab" id="mAddBtn" aria-label="New task">＋</button>
+      <button class="mnav-btn" data-mscope="attention">
+        <span class="mnav-ico">⚠️</span><span class="mnav-label">Flagged</span>
+        <span class="mnav-badge" id="mAttnBadge" hidden>0</span>
+      </button>
+      <button class="mnav-btn" id="mMoreBtn">
+        <span class="mnav-ico">☰</span><span class="mnav-label">More</span>
+      </button>
+    </nav>
   </div>
 
   <!-- ===== Task modal ===== -->
@@ -314,6 +332,39 @@
 
         <p class="people-subhead">People</p>
         <div id="peopleList" class="people-list"><!-- rendered by JS --></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mobile "More" bottom sheet -->
+  <div class="sheet-overlay" id="moreSheet" hidden>
+    <div class="sheet" role="dialog" aria-modal="true" aria-label="Menu">
+      <div class="sheet-handle"></div>
+      <div class="account" id="mAccount">
+        <div class="account-avatar" id="mAccountAvatar">?</div>
+        <div class="account-info">
+          <span class="account-email" id="mAccountEmail"></span>
+          <span class="account-role" id="mAccountRole"></span>
+        </div>
+      </div>
+
+      <div class="sheet-section">
+        <div class="sheet-row-head">
+          <span>Projects</span>
+          <button class="mini-btn" id="mNewProjectBtn" title="New project" aria-label="New project">＋</button>
+        </div>
+        <div id="mProjectList" class="project-list"></div>
+      </div>
+
+      <div class="sheet-actions">
+        <button class="ghost-btn" data-msheet-scope="overdue">🗓️ Overdue</button>
+        <button class="ghost-btn" id="mPeopleBtn" hidden>👥 People &amp; roles</button>
+        <button class="ghost-btn js-theme-toggle">🌙 Theme</button>
+        <button class="ghost-btn" id="mNotifBtn" hidden>🔔 Notifications</button>
+        <button class="ghost-btn" id="mSetPwBtn">🔑 Set a password</button>
+        <button class="ghost-btn" id="mExportBtn">⬇ Export</button>
+        <button class="ghost-btn" id="mImportBtn">⬆ Import</button>
+        <button class="ghost-btn danger-btn" id="mSignOutBtn">⎋ Sign out</button>
       </div>
     </div>
   </div>

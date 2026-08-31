@@ -203,12 +203,19 @@
 
   function renderAccount() {
     if (!me) return;
-    const acc = $("account");
-    acc.hidden = false;
     const email = me.email || "";
+    const role = ROLE_LABEL[myRole] || myRole;
+    const avatar = (email[0] || "?").toUpperCase();
+    $("account").hidden = false;
     $("accountEmail").textContent = email;
-    $("accountRole").textContent = ROLE_LABEL[myRole] || myRole;
-    $("accountAvatar").textContent = (email[0] || "?").toUpperCase();
+    $("accountRole").textContent = role;
+    $("accountAvatar").textContent = avatar;
+    // mobile "More" sheet account
+    if ($("mAccountEmail")) {
+      $("mAccountEmail").textContent = email;
+      $("mAccountRole").textContent = role;
+      $("mAccountAvatar").textContent = avatar;
+    }
   }
 
   // ============================================================
@@ -348,10 +355,20 @@
     $("newTaskBtn").style.display = editor ? "" : "none";
     $("newProjectBtn").style.display = editor ? "" : "none";
     $("peopleBtn").hidden = myRole !== "owner";
+    // mobile equivalents
+    $("mAddBtn").style.display = editor ? "" : "none";
+    $("mNewProjectBtn").style.display = editor ? "" : "none";
+    $("mPeopleBtn").hidden = myRole !== "owner";
   }
 
   function renderSidebarProjects() {
-    projectListEl.innerHTML = projects.map((p) => {
+    renderProjectListInto(projectListEl);
+    renderProjectListInto(document.getElementById("mProjectList"));
+  }
+
+  function renderProjectListInto(el) {
+    if (!el) return;
+    el.innerHTML = projects.map((p) => {
       const n = tasks.filter((t) => t.projectId === p.id).length;
       const active = scope === "project:" + p.id ? "active" : "";
       const edit = can.edit() ? `<button class="row-edit" data-edit="${p.id}" title="Edit project">⋯</button>` : "";
@@ -365,11 +382,11 @@
           ${edit}
         </div>`;
     }).join("");
-    projectListEl.querySelectorAll(".project-btn").forEach((btn) => {
-      btn.addEventListener("click", () => setScope(btn.dataset.scope, btn.querySelector(".project-name").textContent));
+    el.querySelectorAll(".project-btn").forEach((btn) => {
+      btn.addEventListener("click", () => { setScope(btn.dataset.scope, btn.querySelector(".project-name").textContent); closeSheet(); });
     });
-    projectListEl.querySelectorAll(".row-edit").forEach((btn) => {
-      btn.addEventListener("click", (e) => { e.stopPropagation(); openProjectModal(btn.dataset.edit); });
+    el.querySelectorAll(".row-edit").forEach((btn) => {
+      btn.addEventListener("click", (e) => { e.stopPropagation(); closeSheet(); openProjectModal(btn.dataset.edit); });
     });
   }
 
@@ -380,7 +397,13 @@
     if (btn) btn.classList.add("active");
     renderSidebarProjects();
     viewTitle.textContent = title;
+    updateMobileNav();
     render();
+  }
+
+  function updateMobileNav() {
+    document.querySelectorAll(".mnav-btn[data-mscope]").forEach((b) =>
+      b.classList.toggle("active", b.dataset.mscope === scope));
   }
 
   function updateCounts() {
@@ -392,6 +415,8 @@
     });
     setCount("all", tasks.length); setCount("today", today);
     setCount("overdue", overdue); setCount("attention", attention);
+    const badge = $("mAttnBadge");
+    if (badge) { badge.textContent = attention; badge.hidden = attention === 0; }
   }
   function setCount(k, n) { const el = document.querySelector(`[data-count="${k}"]`); if (el) el.textContent = n; }
 
@@ -700,10 +725,10 @@
   }
   function applyThemeLabel() {
     const dark = currentTheme() === "dark";
-    const full = document.getElementById("themeToggle");
-    const mini = document.getElementById("themeToggle2");
-    if (full) full.textContent = dark ? "☀️ Light" : "🌙 Dark";
-    if (mini) mini.textContent = dark ? "☀️" : "🌙";
+    document.querySelectorAll(".js-theme-toggle").forEach((el) => {
+      const emojiOnly = el.classList.contains("theme-top") || el.closest(".portal-account");
+      el.textContent = emojiOnly ? (dark ? "☀️" : "🌙") : (dark ? "☀️ Light mode" : "🌙 Dark mode");
+    });
   }
   function toggleTheme() {
     const next = currentTheme() === "dark" ? "light" : "dark";
@@ -711,23 +736,44 @@
     try { localStorage.setItem("tasktrack.theme", next); } catch (e) {}
     applyThemeLabel();
   }
-  ["themeToggle", "themeToggle2"].forEach((id) => {
-    const el = document.getElementById(id);
-    if (el) el.addEventListener("click", toggleTheme);
-  });
+  document.querySelectorAll(".js-theme-toggle").forEach((el) => el.addEventListener("click", toggleTheme));
   applyThemeLabel();
+
+  // ---- Mobile bottom nav + "More" sheet ----
+  const moreSheet = $("moreSheet");
+  const SCOPE_TITLE = { all: "All tasks", today: "Due today", overdue: "Overdue", attention: "Needs attention" };
+  function openSheet() { renderSidebarProjects(); show(moreSheet); }
+  function closeSheet() { if (moreSheet) moreSheet.hidden = true; }
+
+  document.querySelectorAll(".mnav-btn[data-mscope]").forEach((b) => {
+    b.addEventListener("click", () => setScope(b.dataset.mscope, SCOPE_TITLE[b.dataset.mscope] || "Tasks"));
+  });
+  $("mAddBtn").addEventListener("click", () => openModal(null));
+  $("mMoreBtn").addEventListener("click", openSheet);
+  moreSheet.addEventListener("click", (e) => { if (e.target === moreSheet) closeSheet(); });
+
+  document.querySelectorAll("[data-msheet-scope]").forEach((b) => {
+    b.addEventListener("click", () => { setScope(b.dataset.msheetScope, SCOPE_TITLE[b.dataset.msheetScope] || "Tasks"); closeSheet(); });
+  });
+  $("mNewProjectBtn").addEventListener("click", () => { closeSheet(); openProjectModal(null); });
+  $("mPeopleBtn").addEventListener("click", () => { closeSheet(); openPeople(); });
+  $("mSetPwBtn").addEventListener("click", () => { closeSheet(); setPassword(); });
+  $("mExportBtn").addEventListener("click", () => { closeSheet(); exportBackup(); });
+  $("mImportBtn").addEventListener("click", () => { closeSheet(); $("importFile").click(); });
+  $("mSignOutBtn").addEventListener("click", async () => { await sb.auth.signOut(); });
 
   // ============================================================
   //  Export / Import (client-side backup of the current view of data)
   // ============================================================
-  $("exportBtn").addEventListener("click", () => {
+  function exportBackup() {
     const blob = new Blob([JSON.stringify({ projects, tasks }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = `tasktrack-backup-${todayStr()}.json`; a.click();
     URL.revokeObjectURL(url);
     toast("Backup downloaded");
-  });
+  }
+  $("exportBtn").addEventListener("click", exportBackup);
   const importFile = $("importFile");
   $("importBtn").addEventListener("click", () => importFile.click());
   importFile.addEventListener("change", async (e) => {
@@ -958,19 +1004,22 @@
   //  Web Push notifications (device alerts)
   // ============================================================
   function setupNotifications() {
-    const btn = $("notifBtn");
+    const btns = [$("notifBtn"), $("mNotifBtn")].filter(Boolean);
     if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) return;
     if (!CFG.vapidPublicKey || !can.edit()) return;   // only people who receive nudges
-    if (Notification.permission === "granted") { btn.hidden = true; ensureSubscribed(); return; }
+    if (Notification.permission === "granted") { btns.forEach((b) => (b.hidden = true)); ensureSubscribed(); return; }
     if (Notification.permission === "denied") return;
-    btn.hidden = false;
-    btn.onclick = async () => {
-      const perm = await Notification.requestPermission();
-      if (perm !== "granted") { toast("Notifications not enabled"); return; }
-      await ensureSubscribed();
-      btn.hidden = true;
-      toast("Notifications enabled on this device");
-    };
+    btns.forEach((b) => {
+      b.hidden = false;
+      b.onclick = async () => {
+        closeSheet();
+        const perm = await Notification.requestPermission();
+        if (perm !== "granted") { toast("Notifications not enabled"); return; }
+        await ensureSubscribed();
+        btns.forEach((x) => (x.hidden = true));
+        toast("Notifications enabled on this device");
+      };
+    });
   }
 
   async function ensureSubscribed() {
