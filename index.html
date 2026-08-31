@@ -50,6 +50,55 @@
     </div>
   </div>
 
+  <!-- Requester portal (shown to office staff with the Requester role) -->
+  <div class="portal" id="portalScreen" hidden>
+    <header class="portal-top">
+      <div class="brand">
+        <div class="brand-mark">✓</div>
+        <div class="brand-text"><h1>TaskTrack</h1><span>Office requests</span></div>
+      </div>
+      <div class="portal-account">
+        <span class="account-email" id="portalEmail"></span>
+        <button class="ghost-btn" id="portalSignOut">Sign out</button>
+      </div>
+    </header>
+    <div class="portal-body">
+      <section class="portal-new">
+        <h2>Request something from the office</h2>
+        <p class="portal-hint">Log what you need. You'll be able to track its status here and nudge if it's taking too long.</p>
+        <form id="requestForm">
+          <label class="field">
+            <span>What do you need?</span>
+            <input type="text" id="rTitle" required placeholder="e.g. Approve the vendor contract" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>Details (optional)</span>
+            <textarea id="rNotes" rows="3" placeholder="Context, links, deadlines…"></textarea>
+          </label>
+          <div class="field-row">
+            <label class="field">
+              <span>Needed by (optional)</span>
+              <input type="date" id="rDue" />
+            </label>
+            <label class="field">
+              <span>Priority</span>
+              <select id="rPriority">
+                <option value="low">Low</option>
+                <option value="medium" selected>Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+          </div>
+          <button type="submit" class="primary-btn wide">Submit request</button>
+        </form>
+      </section>
+      <section class="portal-list">
+        <h2>My requests</h2>
+        <div id="requestList"><!-- rendered by JS --></div>
+      </section>
+    </div>
+  </div>
+
   <div class="app" id="app" hidden>
     <!-- ===== Sidebar ===== -->
     <aside class="sidebar">
@@ -75,6 +124,13 @@
           <span class="dot" style="background:#ef4444"></span> Overdue
           <span class="count" data-count="overdue">0</span>
         </button>
+        <button class="filter-btn" data-scope="attention">
+          <span class="dot" style="background:#f97316"></span> Needs attention
+          <span class="count" data-count="attention">0</span>
+        </button>
+        <button class="filter-btn" id="peopleBtn" hidden>
+          <span class="dot" style="background:#0ea5e9"></span> People &amp; roles
+        </button>
 
         <div class="filters-label with-action">
           <span>Projects</span>
@@ -84,6 +140,7 @@
       </nav>
 
       <div class="sidebar-footer">
+        <button class="ghost-btn notif-btn" id="notifBtn" hidden title="Get notified on this device">🔔 Enable notifications</button>
         <div class="account" id="account" hidden>
           <div class="account-avatar" id="accountAvatar">?</div>
           <div class="account-info">
@@ -208,6 +265,20 @@
           <button type="submit" class="primary-btn">Save project</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- People & roles (Owner only) -->
+  <div class="modal-overlay" id="peopleOverlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="peopleTitle">
+      <div class="modal-head">
+        <h3 id="peopleTitle">People &amp; roles</h3>
+        <button class="icon-btn" id="closePeople" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="people-hint">Set what each person can do. Only you (the Owner) can change roles.</p>
+        <div id="peopleList" class="people-list"><!-- rendered by JS --></div>
+      </div>
     </div>
   </div>
 

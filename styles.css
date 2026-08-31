@@ -114,6 +114,45 @@ body {
 .account-role { font-size: 11px; color: var(--c-text-faint); }
 .footer-actions { display: flex; gap: 8px; }
 .upload-text { font-size: 14px; color: var(--c-text-soft); line-height: 1.5; margin: 0 0 4px; }
+.notif-btn { width: 100%; margin-bottom: 10px; }
+
+/* ===== Request / attention badges ===== */
+.chip.request-chip { background: rgba(14,165,233,.14); color: #0284c7; }
+.chip.attention-chip { background: rgba(249,115,22,.16); color: #ea580c; }
+.card.flagged, .list-row.flagged { box-shadow: 0 0 0 2px rgba(249,115,22,.4); }
+
+/* ===== People & roles ===== */
+.people-hint { font-size: 13px; color: var(--c-text-soft); margin: 0 0 14px; }
+.people-list { display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y: auto; }
+.person-row { display: flex; align-items: center; gap: 12px; padding: 8px; border: 1px solid var(--c-border); border-radius: 10px; }
+.person-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.person-name { font-size: 13.5px; font-weight: 600; }
+.person-email { font-size: 12px; color: var(--c-text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.you-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: var(--c-accent); background: var(--c-accent-soft); padding: 1px 6px; border-radius: 10px; margin-left: 4px; }
+.person-role { border: 1px solid var(--c-border); background: var(--c-surface-2); border-radius: 8px; padding: 6px 8px; font-size: 13px; font-family: inherit; color: var(--c-text); }
+
+/* ===== Requester portal ===== */
+.portal { position: fixed; inset: 0; overflow-y: auto; background: var(--c-bg); }
+.portal-top { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; background: var(--c-surface); border-bottom: 1px solid var(--c-border); }
+.portal-account { display: flex; align-items: center; gap: 12px; }
+.portal-body { max-width: 680px; margin: 0 auto; padding: 24px 20px 60px; display: flex; flex-direction: column; gap: 28px; }
+.portal-new, .portal-list { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: 14px; padding: 22px; }
+.portal-new h2, .portal-list h2 { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
+.portal-hint { font-size: 13px; color: var(--c-text-faint); margin-bottom: 16px; }
+.portal-new form { display: flex; flex-direction: column; gap: 14px; }
+.request-row { display: flex; align-items: center; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--c-border); }
+.request-row:last-child { border-bottom: none; }
+.request-main { flex: 1; min-width: 0; }
+.request-title { font-size: 14.5px; font-weight: 600; }
+.request-row.done .request-title { text-decoration: line-through; color: var(--c-text-faint); }
+.request-meta { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.nudge-btn { flex: none; }
+.status-badge { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 20px; text-transform: uppercase; letter-spacing: .3px; }
+.status-badge.s-pending { background: rgba(148,163,184,.18); color: #64748b; }
+.status-badge.s-inprogress { background: rgba(59,130,246,.15); color: #2563eb; }
+.status-badge.s-blocked { background: rgba(239,68,68,.14); color: #dc2626; }
+.status-badge.s-onhold { background: rgba(245,158,11,.16); color: #d97706; }
+.status-badge.s-completed { background: rgba(34,197,94,.16); color: #16a34a; }
 
 /* ===== Sidebar ===== */
 .sidebar {

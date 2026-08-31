@@ -32,7 +32,8 @@
   const ROLE_LABEL = { owner: "Owner", delegate: "Delegate", editor: "Editor", viewer: "Viewer", requester: "Requester" };
 
   // ---- State ----
-  let projects = [], tasks = [];
+  let projects = [], tasks = [], people = [];
+  let profilesById = {};
   let me = null, myRole = "requester";
   let scope = "all", view = "list", query = "";
   let appReady = false, realtimeChannel = null;
@@ -55,7 +56,8 @@
   const taskFromRow = (r) => ({
     id: r.id, title: r.title, notes: r.notes || "", projectId: r.project_id,
     priority: r.priority, status: r.status, due: r.due || "",
-    source: r.source, requesterId: r.requester_id, created: r.created_at,
+    source: r.source, requesterId: r.requester_id, needsAttention: !!r.needs_attention,
+    created: r.created_at,
   });
   const rowFromTask = (t) => ({
     title: t.title, notes: t.notes, project_id: t.projectId || null,
@@ -97,14 +99,27 @@
     if (appReady) return;         // guard against duplicate SIGNED_IN events
     appReady = true;
     me = session.user;
-    hide(authScreen); hide(bootEl); show(appEl);
-    renderAccount();
+    hide(authScreen); hide(bootEl);
     await loadRole();
+
+    if (myRole === "requester") {
+      // Office staff: the simplified request portal.
+      show($("portalScreen"));
+      $("portalEmail").textContent = me.email || "";
+      await loadTasks();          // returns only their own requests (RLS)
+      subscribeRealtime();
+      renderRequests();
+      return;
+    }
+
+    // Boss / delegate / editor / viewer: the full app.
+    show(appEl);
     renderAccount();
-    await Promise.all([loadProjects(), loadTasks()]);
+    await Promise.all([loadProjects(), loadTasks(), loadPeople()]);
     saveCache();
     subscribeRealtime();
     render();
+    setupNotifications();
     maybeOfferLocalUpload();
   }
 
@@ -164,6 +179,25 @@
     } catch (e) { fromCache("tasks"); }
   }
 
+  async function loadPeople() {
+    if (!can.staff()) return;
+    try {
+      const { data, error } = await sb.from("memberships").select("user_id, role, profiles(email, full_name, avatar_url)");
+      if (error) throw error;
+      people = (data || []).map((m) => ({
+        userId: m.user_id, role: m.role,
+        email: m.profiles ? m.profiles.email : "", name: m.profiles ? m.profiles.full_name : "",
+      }));
+      profilesById = {};
+      people.forEach((p) => (profilesById[p.userId] = p));
+    } catch (e) { /* non-fatal */ }
+  }
+
+  function requesterName(id) {
+    const p = profilesById[id];
+    return p ? (p.name || p.email || "Someone") : "Someone";
+  }
+
   function saveCache() {
     try { localStorage.setItem(CACHE_KEY, JSON.stringify({ projects, tasks })); } catch (e) {}
   }
@@ -203,6 +237,7 @@
       const i = arr.findIndex((x) => x.id === obj.id);
       if (i >= 0) arr[i] = obj; else arr.unshift(obj);
     }
+    if (myRole === "requester") { renderRequests(); return; }
     saveCache();
     render();
   }
@@ -228,6 +263,7 @@
     return tasks.filter((t) => {
       if (scope === "today" && dueState(t.due) !== "today") return false;
       if (scope === "overdue" && dueState(t.due) !== "overdue") return false;
+      if (scope === "attention" && !t.needsAttention) return false;
       if (scope.startsWith("project:") && t.projectId !== scope.slice(8)) return false;
       if (query) {
         const hay = (t.title + " " + (t.notes || "")).toLowerCase();
@@ -250,6 +286,7 @@
     const editor = can.edit();
     $("newTaskBtn").style.display = editor ? "" : "none";
     $("newProjectBtn").style.display = editor ? "" : "none";
+    $("peopleBtn").hidden = myRole !== "owner";
   }
 
   function renderSidebarProjects() {
@@ -286,12 +323,14 @@
   }
 
   function updateCounts() {
-    let today = 0, overdue = 0;
+    let today = 0, overdue = 0, attention = 0;
     tasks.forEach((t) => {
       const ds = dueState(t.due);
       if (ds === "today") today++; if (ds === "overdue") overdue++;
+      if (t.needsAttention) attention++;
     });
-    setCount("all", tasks.length); setCount("today", today); setCount("overdue", overdue);
+    setCount("all", tasks.length); setCount("today", today);
+    setCount("overdue", overdue); setCount("attention", attention);
   }
   function setCount(k, n) { const el = document.querySelector(`[data-count="${k}"]`); if (el) el.textContent = n; }
 
@@ -300,16 +339,19 @@
     return p ? `<span class="chip project-chip" style="--pc:${p.color}">${esc(p.name)}</span>` : "";
   }
 
+  const requestChip = (t) => t.source === "request" ? `<span class="chip request-chip">📨 ${esc(requesterName(t.requesterId))}</span>` : "";
+  const attentionChip = (t) => t.needsAttention ? `<span class="chip attention-chip">⚠ Needs attention</span>` : "";
+
   function cardMarkup(t) {
     const ds = dueState(t.due);
     const dueChip = t.due ? `<span class="chip due ${ds === "overdue" ? "overdue" : ds === "today" ? "today" : ""}">📅 ${formatDue(t.due)}</span>` : "";
     const notes = t.notes ? `<div class="card-notes">${esc(t.notes)}</div>` : "";
     const drag = can.edit() ? 'draggable="true"' : "";
     return `
-      <div class="card prio-${t.priority} ${t.status === "completed" ? "done" : ""}" ${drag} data-id="${t.id}">
+      <div class="card prio-${t.priority} ${t.status === "completed" ? "done" : ""} ${t.needsAttention ? "flagged" : ""}" ${drag} data-id="${t.id}">
         <div class="card-title">${esc(t.title)}</div>
         ${notes}
-        <div class="card-meta">${projectChip(t)}<span class="chip prio ${t.priority}">${t.priority}</span>${dueChip}</div>
+        <div class="card-meta">${attentionChip(t)}${requestChip(t)}${projectChip(t)}<span class="chip prio ${t.priority}">${t.priority}</span>${dueChip}</div>
       </div>`;
   }
 
@@ -337,13 +379,13 @@
         const ds = dueState(t.due);
         const dueChip = t.due ? `<span class="chip due ${ds === "overdue" ? "overdue" : ds === "today" ? "today" : ""}">📅 ${formatDue(t.due)}</span>` : "";
         return `
-          <div class="list-row prio-${t.priority} ${t.status === "completed" ? "done" : ""}" data-id="${t.id}">
+          <div class="list-row prio-${t.priority} ${t.status === "completed" ? "done" : ""} ${t.needsAttention ? "flagged" : ""}" data-id="${t.id}">
             <div class="list-check" data-check="${t.id}" title="Toggle complete">✓</div>
             <div class="list-main">
               <div class="list-title">${esc(t.title)}</div>
               ${t.notes ? `<div class="list-sub">${esc(t.notes)}</div>` : ""}
             </div>
-            <div class="list-meta">${projectChip(t)}<span class="chip prio ${t.priority}">${t.priority}</span>${dueChip}</div>
+            <div class="list-meta">${attentionChip(t)}${requestChip(t)}${projectChip(t)}<span class="chip prio ${t.priority}">${t.priority}</span>${dueChip}</div>
           </div>`;
       }).join("");
       return `
@@ -419,7 +461,9 @@
   async function updateTask(id, patch) {
     const task = tasks.find((t) => t.id === id);
     const merged = { ...task, ...patch };
-    const { data: updated, error } = await sb.from("tasks").update(rowFromTask(merged)).eq("id", id).select().single();
+    // A staff member touching a task counts as attending to it — clear the flag.
+    const row = { ...rowFromTask(merged), needs_attention: false };
+    const { data: updated, error } = await sb.from("tasks").update(row).eq("id", id).select().single();
     if (error) return failWrite(error);
     upsertLocal(tasks, taskFromRow(updated)); saveCache(); render();
   }
@@ -576,6 +620,7 @@
   //  Sidebar view filters + layout toggle + search
   // ============================================================
   document.querySelectorAll(".filters > .filter-btn").forEach((btn) => {
+    if (!btn.dataset.scope) return;   // skip action buttons like "People & roles"
     btn.addEventListener("click", () => setScope(btn.dataset.scope, btn.textContent.trim().replace(/\s*\d+$/, "")));
   });
   document.querySelectorAll(".toggle-btn").forEach((btn) => {
@@ -658,6 +703,158 @@
         priority: t.priority || "medium", status: t.status || "pending", due: t.due || "",
       });
     }
+  }
+
+  // ============================================================
+  //  People & roles (Owner only)
+  // ============================================================
+  const ROLES = ["owner", "delegate", "editor", "viewer", "requester"];
+  const peopleOverlay = $("peopleOverlay");
+
+  $("peopleBtn").addEventListener("click", openPeople);
+  $("closePeople").addEventListener("click", () => hide(peopleOverlay));
+  peopleOverlay.addEventListener("click", (e) => { if (e.target === peopleOverlay) hide(peopleOverlay); });
+
+  function openPeople() {
+    renderPeople();                 // show what we already have, instantly
+    show(peopleOverlay);
+    // refresh in the background so external role changes appear
+    loadPeople().then(renderPeople).catch(() => {});
+  }
+
+  function renderPeople() {
+    const list = $("peopleList");
+    const order = { owner: 0, delegate: 1, editor: 2, viewer: 3, requester: 4 };
+    const sorted = [...people].sort((a, b) => (order[a.role] - order[b.role]) || (a.email || "").localeCompare(b.email || ""));
+    list.innerHTML = sorted.map((p) => {
+      const isMe = p.userId === me.id;
+      const opts = ROLES.map((r) => `<option value="${r}" ${p.role === r ? "selected" : ""}>${ROLE_LABEL[r]}</option>`).join("");
+      const label = p.name || p.email || "Unknown";
+      return `
+        <div class="person-row">
+          <div class="account-avatar">${esc((label[0] || "?").toUpperCase())}</div>
+          <div class="person-info">
+            <span class="person-name">${esc(label)}${isMe ? ' <span class="you-tag">you</span>' : ""}</span>
+            <span class="person-email">${esc(p.email || "")}</span>
+          </div>
+          <select class="person-role" data-user="${p.userId}" ${isMe ? "disabled" : ""}>${opts}</select>
+        </div>`;
+    }).join("");
+    list.querySelectorAll(".person-role").forEach((sel) =>
+      sel.addEventListener("change", () => changeRole(sel.dataset.user, sel.value)));
+  }
+
+  async function changeRole(userId, role) {
+    const { error } = await sb.from("memberships")
+      .update({ role, updated_by: me.id, updated_at: new Date().toISOString() }).eq("user_id", userId);
+    if (error) { toast(error.message || "Could not update role"); return; }
+    const p = people.find((x) => x.userId === userId);
+    if (p) { p.role = role; profilesById[userId] = p; }
+    toast("Role updated");
+  }
+
+  // ============================================================
+  //  Requester portal (submit requests, track status, nudge)
+  // ============================================================
+  $("portalSignOut").addEventListener("click", async () => { await sb.auth.signOut(); });
+
+  $("requestForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const title = $("rTitle").value.trim();
+    if (!title) return;
+    const row = {
+      title, notes: $("rNotes").value.trim(), due: $("rDue").value || null,
+      priority: $("rPriority").value, status: "pending", source: "request",
+      requester_id: me.id, created_by: me.id, project_id: null,
+    };
+    const { data, error } = await sb.from("tasks").insert(row).select().single();
+    if (error) { toast(error.message || "Could not submit request"); return; }
+    upsertLocal(tasks, taskFromRow(data));
+    e.target.reset();
+    renderRequests();
+    toast("Request submitted");
+  });
+
+  function renderRequests() {
+    const list = $("requestList");
+    const mine = [...tasks].sort((a, b) => new Date(b.created) - new Date(a.created));
+    if (!mine.length) {
+      list.innerHTML = `<div class="empty-state"><div class="big">📮</div><p>No requests yet — submit one above.</p></div>`;
+      return;
+    }
+    list.innerHTML = mine.map((t) => {
+      const done = t.status === "completed";
+      const dueChip = t.due ? `<span class="chip due">📅 ${formatDue(t.due)}</span>` : "";
+      const nudged = t.needsAttention ? `<span class="chip attention-chip">Nudged</span>` : "";
+      return `
+        <div class="request-row ${done ? "done" : ""}">
+          <div class="request-main">
+            <div class="request-title">${esc(t.title)}</div>
+            ${t.notes ? `<div class="list-sub">${esc(t.notes)}</div>` : ""}
+            <div class="request-meta">
+              <span class="status-badge s-${t.status}">${statusLabel(t.status)}</span>
+              ${dueChip}${nudged}
+            </div>
+          </div>
+          <button class="ghost-btn nudge-btn" data-nudge="${t.id}" ${done ? "disabled" : ""}>Nudge</button>
+        </div>`;
+    }).join("");
+    list.querySelectorAll("[data-nudge]").forEach((b) => b.addEventListener("click", () => nudge(b.dataset.nudge)));
+  }
+
+  async function nudge(taskId) {
+    const { error } = await sb.from("task_events").insert({ task_id: taskId, user_id: me.id, type: "nudge", message: "Nudge" });
+    if (error) { toast(error.message || "Could not nudge"); return; }
+    const t = tasks.find((x) => x.id === taskId);
+    if (t) t.needsAttention = true;
+    renderRequests();
+    toast("Nudge sent — they'll see it flagged");
+  }
+
+  // ============================================================
+  //  Web Push notifications (device alerts)
+  // ============================================================
+  function setupNotifications() {
+    const btn = $("notifBtn");
+    if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) return;
+    if (!CFG.vapidPublicKey || !can.edit()) return;   // only people who receive nudges
+    if (Notification.permission === "granted") { btn.hidden = true; ensureSubscribed(); return; }
+    if (Notification.permission === "denied") return;
+    btn.hidden = false;
+    btn.onclick = async () => {
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") { toast("Notifications not enabled"); return; }
+      await ensureSubscribed();
+      btn.hidden = true;
+      toast("Notifications enabled on this device");
+    };
+  }
+
+  async function ensureSubscribed() {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) {
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlB64ToUint8(CFG.vapidPublicKey),
+        });
+      }
+      const j = sub.toJSON();
+      await sb.from("push_subscriptions").upsert(
+        { user_id: me.id, endpoint: sub.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, user_agent: navigator.userAgent },
+        { onConflict: "endpoint" }
+      );
+    } catch (e) { console.warn("Push subscribe failed:", e); }
+  }
+
+  function urlB64ToUint8(base64) {
+    const pad = "=".repeat((4 - (base64.length % 4)) % 4);
+    const b64 = (base64 + pad).replace(/-/g, "+").replace(/_/g, "/");
+    const raw = atob(b64);
+    const arr = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+    return arr;
   }
 
   // ============================================================

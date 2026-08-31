@@ -177,6 +177,24 @@ drop trigger if exists tasks_touch on public.tasks;
 create trigger tasks_touch before update on public.tasks
   for each row execute function public.touch_task();
 
+-- ---------- Flag a task when someone nudges it ----------
+-- Lets a requester (who can't update tasks directly) raise the "needs
+-- attention" flag by inserting a nudge event. Runs as definer, so it can set
+-- the flag regardless of the nudger's row-level permissions.
+create or replace function public.flag_on_nudge()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.type = 'nudge' then
+    update public.tasks set needs_attention = true where id = new.task_id;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists task_events_nudge on public.task_events;
+create trigger task_events_nudge after insert on public.task_events
+  for each row execute function public.flag_on_nudge();
+
 -- ============================================================================
 --  Row-Level Security
 -- ============================================================================
