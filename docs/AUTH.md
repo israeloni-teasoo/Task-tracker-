@@ -55,12 +55,29 @@ Easiest route — an **App Password** on a sending mailbox in your domain:
    - **Sender name:** `MP Office` (or `TaskTrack`)
 5. **Save**, then trigger a magic link to test.
 
-Deliverability (recommended, in the Google **Admin console**):
-- **Apps → Google Workspace → Gmail → Authenticate email** → turn on **DKIM**
-  and add the TXT record it gives you.
-- Your domain's SPF should include Google
+### DKIM (recommended — keeps mail out of spam)
+
+1. **Generate the key** in the Google **Admin console** → **Apps → Google
+   Workspace → Gmail → Authenticate email** → pick `teasooconsulting.com` →
+   **Generate new record** (2048-bit; prefix selector `google`).
+2. Google shows a TXT record — **Host** `google._domainkey`, **Value**
+   `v=DKIM1; k=rsa; p=…`. Add it in the DNS zone for `teasooconsulting.com`
+   (the root domain's DNS, not the Vercel subdomain).
+   - If a 2048-bit value is too long for your DNS panel, split it into quoted
+     255-char chunks as Google shows, or regenerate as 1024-bit.
+3. Back in **Authenticate email**, wait for DNS to propagate, then click
+   **Start authentication** (status → "Authenticating email").
+4. Verify: send a test, open it in Gmail → **⋮ → Show original** → expect
+   **DKIM: PASS** for `teasooconsulting.com`.
+
+### SPF & DMARC
+
+- **SPF:** your domain's TXT should include Google
   (`v=spf1 include:_spf.google.com ~all`) — Workspace domains usually already
   have this.
+- **DMARC (recommended):** add a TXT record at **`_dmarc`** with
+  `v=DMARC1; p=none; rua=mailto:dmarc@teasooconsulting.com; fo=1` to start
+  monitoring, then tighten to `p=quarantine` / `p=reject` once reports look clean.
 
 Limits: `smtp.gmail.com` allows ~2,000 messages/day on Workspace — far more than
 you'll need. For very high volume or sending as many different addresses, use
