@@ -15,14 +15,14 @@ learning curve.
 
 ## How to use it
 
-**Hosted (recommended):** once GitHub Pages finishes deploying, the app is live at:
+**Hosted on Vercel.** The repo is connected to Vercel, which deploys the site on
+every push to the production branch. Open the Vercel URL
+(`https://<your-project>.vercel.app/`) and sign in.
 
-> **https://israeloni-teasoo.github.io/Task-tracker-/**
-
-Open that link in any modern browser and start adding tasks with **＋ New task**.
-
-**Or offline/local:** open **`index.html`** directly in a browser — it still works
-(the installable-app and offline features just need the hosted link).
+> Set the Vercel **Production Branch** to `claude/internal-task-tracker-43ehtk`
+> (the repo's default branch), and add the Vercel URL to Supabase →
+> Authentication → **URL Configuration** (Site URL + Redirect URLs) so the login
+> link can return to the app.
 
 ### Install it as an app (free — no App Store, no cost)
 
@@ -33,8 +33,7 @@ native app, on phones and computers:
 - **Samsung / Android (Chrome):** open the link → menu **⋮** → **Add to Home screen** / **Install app**.
 - **Desktop (Chrome/Edge):** click the **install** icon in the address bar.
 
-After installing, it opens from its own icon and **works offline** — no internet
-needed to view or edit tasks.
+After installing, it opens from its own icon and works offline for viewing.
 
 ### Everyday actions
 
@@ -87,29 +86,40 @@ sw.js                 — service worker (offline support)
 icons/                — app icons
 backend/schema.sql    — database tables, roles & row-level security
 backend/migrations/   — incremental DB changes to apply on existing projects
-.nojekyll             — serve files as-is on GitHub Pages
+backend/functions/    — Supabase Edge Function for web push
+vercel.json           — Vercel static-hosting config
 ```
 
-No build step, no framework. Edit and refresh; pushing to the default branch
-redeploys the hosted site automatically.
+No build step, no framework. Pushing to the production branch redeploys on
+Vercel automatically.
 
-## Hosting (one-time setup)
+## Hosting (Vercel)
 
-The site is served by **GitHub Pages**. To turn it on (once):
+The repo is connected to **Vercel**, which serves the static site (no build
+command needed). To finish setup:
 
-1. Go to the repo **Settings → Pages**.
-2. Under **Build and deployment → Source**, choose **Deploy from a branch**.
-3. Set **Branch** to `claude/internal-task-tracker-43ehtk` and folder **`/ (root)`**, then **Save**.
+1. In Vercel → Project → Settings → **Git**, set the **Production Branch** to
+   `claude/internal-task-tracker-43ehtk`.
+2. Copy the deployment URL (`https://<your-project>.vercel.app/`).
+3. In Supabase → Authentication → **URL Configuration**, set the **Site URL** to
+   that URL and add it under **Redirect URLs**, so magic-link logins return to
+   the app.
 
-Within ~1 minute the app is live at
-**https://israeloni-teasoo.github.io/Task-tracker-/**, and every future push to
-that branch republishes it automatically.
+Every push to the production branch then redeploys automatically.
 
-## Roadmap: multi-user, sync, roles & office portal
+## Roles & permissions setup
 
-The next phase turns TaskTrack into a shared system with logins, roles &
-permissions, cross-device sync, an office request portal, and push
-notifications/reminders — all on free infrastructure (Supabase + GitHub Pages).
+1. Apply `backend/schema.sql`, then the files in `backend/migrations/` in order.
+2. **You sign in first** → you become the **Owner** (for testing/development).
+3. Open **People & roles** → add the boss's email and set it to **Owner**. When
+   she signs in she becomes an Owner too — multiple Owners are supported, so you
+   keep full access. You can also change anyone's role there after they sign in.
+
+## Roadmap
+
+Implemented: logins, cross-device sync, roles & permissions, office request
+portal, in-app "needs attention" flags, auto-reminders, and (optional) web push.
+All on free infrastructure (Supabase + Vercel).
 
 - **Design & permission model:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - **Database schema & security policies:** [`backend/schema.sql`](backend/schema.sql)

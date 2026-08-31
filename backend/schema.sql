@@ -32,6 +32,15 @@ create table public.memberships (
   created_at timestamptz not null default now()
 );
 
+-- Pre-assigned roles by email — lets the Owner grant a role to someone before
+-- they have signed in. Consumed by the sign-up trigger below.
+create table public.role_invites (
+  email      text primary key,
+  role       app_role not null default 'requester',
+  invited_by uuid references public.profiles(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
 -- Projects group tasks (e.g. "Work", "Personal", "Board of Directors").
 -- Shared across the workspace; staff (editor+) manage them.
 create table public.projects (
@@ -132,6 +141,7 @@ create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare
   assigned app_role := 'requester';
+  invited  app_role;
 begin
   insert into public.profiles (id, full_name, email, avatar_url)
   values (
@@ -141,10 +151,16 @@ begin
     new.raw_user_meta_data->>'avatar_url'
   ) on conflict (id) do nothing;
 
-  -- The very first person to sign in becomes the Owner (bootstraps the boss);
-  -- everyone after that defaults to Requester until the Owner promotes them.
+  -- First user becomes the Owner; otherwise honour a pre-assigned role
+  -- (invite) for this email; otherwise default to Requester.
   if not exists (select 1 from public.memberships where role = 'owner') then
     assigned := 'owner';
+  else
+    select role into invited from public.role_invites where email = lower(new.email);
+    if invited is not null then
+      assigned := invited;
+      delete from public.role_invites where email = lower(new.email);
+    end if;
   end if;
 
   insert into public.memberships (user_id, role)
@@ -200,6 +216,7 @@ create trigger task_events_nudge after insert on public.task_events
 -- ============================================================================
 alter table public.profiles           enable row level security;
 alter table public.memberships         enable row level security;
+alter table public.role_invites        enable row level security;
 alter table public.projects            enable row level security;
 alter table public.tasks               enable row level security;
 alter table public.task_events         enable row level security;
@@ -216,6 +233,10 @@ create policy profiles_update_own on public.profiles for update
 create policy memberships_select on public.memberships for select
   using (user_id = auth.uid() or public.is_staff());
 create policy memberships_write on public.memberships for all
+  using (public.is_owner()) with check (public.is_owner());
+
+-- role_invites: only the Owner can view or manage pre-assigned roles.
+create policy role_invites_owner on public.role_invites for all
   using (public.is_owner()) with check (public.is_owner());
 
 -- projects: any signed-in person may read; staff (editor+) manage them.

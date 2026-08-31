@@ -276,7 +276,24 @@
         <button class="icon-btn" id="closePeople" aria-label="Close">✕</button>
       </div>
       <div class="modal-body">
-        <p class="people-hint">Set what each person can do. Only you (the Owner) can change roles.</p>
+        <p class="people-hint">Set what each person can do. Only an Owner can change roles.</p>
+
+        <form id="inviteForm" class="invite-form">
+          <input type="email" id="inviteEmail" placeholder="Add someone by email…" autocomplete="off" />
+          <select id="inviteRole">
+            <option value="owner">Owner</option>
+            <option value="delegate">Delegate</option>
+            <option value="editor">Editor</option>
+            <option value="viewer">Viewer</option>
+            <option value="requester" selected>Requester</option>
+          </select>
+          <button type="submit" class="primary-btn">Add</button>
+        </form>
+        <p class="invite-hint">They get this role automatically the first time they sign in — you can add the boss as <strong>Owner</strong> before she logs in.</p>
+
+        <div id="inviteList" class="invite-list"><!-- pending invites --></div>
+
+        <p class="people-subhead">People</p>
         <div id="peopleList" class="people-list"><!-- rendered by JS --></div>
       </div>
     </div>

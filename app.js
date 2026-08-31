@@ -715,11 +715,68 @@
   $("closePeople").addEventListener("click", () => hide(peopleOverlay));
   peopleOverlay.addEventListener("click", (e) => { if (e.target === peopleOverlay) hide(peopleOverlay); });
 
+  let invites = [];
+
   function openPeople() {
     renderPeople();                 // show what we already have, instantly
+    renderInvites();
     show(peopleOverlay);
-    // refresh in the background so external role changes appear
+    // refresh in the background so external changes appear
     loadPeople().then(renderPeople).catch(() => {});
+    loadInvites();
+  }
+
+  async function loadInvites() {
+    try {
+      const { data, error } = await sb.from("role_invites").select("*").order("created_at");
+      if (error) throw error;
+      invites = data || [];
+      renderInvites();
+    } catch (e) { /* non-owner or offline */ }
+  }
+
+  function renderInvites() {
+    const el = $("inviteList");
+    if (!invites.length) { el.innerHTML = ""; return; }
+    el.innerHTML = invites.map((i) => `
+      <div class="invite-row">
+        <span class="invite-email">${esc(i.email)}</span>
+        <span class="invite-role-tag">${ROLE_LABEL[i.role] || i.role}</span>
+        <button class="row-edit" data-cancel="${esc(i.email)}" title="Cancel invite">✕</button>
+      </div>`).join("");
+    el.querySelectorAll("[data-cancel]").forEach((b) =>
+      b.addEventListener("click", () => cancelInvite(b.dataset.cancel)));
+  }
+
+  $("inviteForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const email = $("inviteEmail").value.trim().toLowerCase();
+    const role = $("inviteRole").value;
+    if (!email) return;
+    // If they've already signed in, change their role directly instead.
+    const existing = people.find((p) => (p.email || "").toLowerCase() === email);
+    if (existing) {
+      await changeRole(existing.userId, role);
+      $("inviteEmail").value = "";
+      return;
+    }
+    const { error } = await sb.from("role_invites")
+      .upsert({ email, role, invited_by: me.id }, { onConflict: "email" });
+    if (error) { toast(error.message || "Could not add invite"); return; }
+    $("inviteEmail").value = "";
+    // optimistic update, then reconcile in the background
+    invites = invites.filter((i) => i.email !== email).concat([{ email, role, created_at: new Date().toISOString() }]);
+    renderInvites();
+    toast(`${email} will be ${ROLE_LABEL[role]} when they sign in`);
+    loadInvites();
+  });
+
+  async function cancelInvite(email) {
+    const { error } = await sb.from("role_invites").delete().eq("email", email);
+    if (error) { toast(error.message || "Could not cancel"); return; }
+    invites = invites.filter((i) => i.email !== email);
+    renderInvites();
+    toast("Invite removed");
   }
 
   function renderPeople() {
