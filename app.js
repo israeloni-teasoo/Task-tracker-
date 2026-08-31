@@ -122,6 +122,7 @@
     render();
     setupNotifications();
     maybeOfferLocalUpload();
+    maybePromptPassword();
   }
 
   // ---- Login form ----
@@ -174,12 +175,30 @@
 
   $("signOutBtn").addEventListener("click", async () => { await sb.auth.signOut(); });
 
-  $("setPwBtn").addEventListener("click", async () => {
-    const pw = prompt("Set a password for faster sign-in next time (at least 6 characters):");
+  async function setPassword() {
+    const pw = prompt("Set a password for faster sign-in on your other devices (at least 6 characters):");
     if (pw == null) return;
     if (pw.length < 6) { toast("Password must be at least 6 characters"); return; }
     const { error } = await sb.auth.updateUser({ password: pw });
-    toast(error ? (error.message || "Could not set password") : "Password set — you can sign in with it next time");
+    if (!error) { try { localStorage.setItem("tasktrack.pwPrompted", "1"); } catch (e) {} }
+    toast(error ? (error.message || "Could not set password") : "Password set — use it to sign in on any device");
+  }
+  $("setPwBtn").addEventListener("click", setPassword);
+
+  // One-time nudge: encourage setting a password so other devices don't rely on
+  // the (rate-limited) email link.
+  function maybePromptPassword() {
+    try { if (localStorage.getItem("tasktrack.pwPrompted")) return; } catch (e) { return; }
+    if (!$("uploadOverlay").hidden) return;   // don't stack over the upload prompt
+    show($("pwPromptOverlay"));
+  }
+  $("pwPromptLater").addEventListener("click", () => {
+    hide($("pwPromptOverlay"));
+    try { localStorage.setItem("tasktrack.pwPrompted", "1"); } catch (e) {}
+  });
+  $("pwPromptSet").addEventListener("click", async () => {
+    hide($("pwPromptOverlay"));
+    await setPassword();
   });
 
   function renderAccount() {

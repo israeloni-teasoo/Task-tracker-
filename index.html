@@ -318,6 +318,21 @@
     </div>
   </div>
 
+  <!-- One-time nudge to set a password (avoids relying on the email link) -->
+  <div class="modal-overlay" id="pwPromptOverlay" hidden>
+    <div class="modal modal-sm" role="dialog" aria-modal="true">
+      <div class="modal-head"><h3>Set a password?</h3></div>
+      <div class="modal-body">
+        <p class="upload-text">Set a password so you can sign in on your phone and other devices instantly — no waiting for an email link.</p>
+        <div class="modal-foot">
+          <div class="spacer"></div>
+          <button type="button" class="ghost-btn" id="pwPromptLater">Maybe later</button>
+          <button type="button" class="primary-btn" id="pwPromptSet">Set a password</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Local-tasks upload prompt (first cloud login on a device with local tasks) -->
   <div class="modal-overlay" id="uploadOverlay" hidden>
     <div class="modal modal-sm" role="dialog" aria-modal="true">

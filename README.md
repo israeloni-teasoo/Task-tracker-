@@ -68,7 +68,8 @@ the app on an iPhone, a Samsung and a laptop and a change on one shows on the
 others within seconds.
 
 Roles decide what each person can do (Owner, Delegate, Editor, Viewer,
-Requester) — see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+Requester) — see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). For email
+limits and connecting your own email sender, see [`docs/AUTH.md`](docs/AUTH.md).
 
 ## Public office request link
 
