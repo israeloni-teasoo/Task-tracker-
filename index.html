@@ -22,7 +22,35 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="app">
+  <!-- Boot spinner (shown until we know if you're signed in) -->
+  <div class="boot" id="bootLoading">
+    <div class="boot-mark">✓</div>
+    <div class="spinner"></div>
+  </div>
+
+  <!-- Login screen -->
+  <div class="auth-screen" id="authScreen" hidden>
+    <div class="auth-card">
+      <div class="brand center">
+        <div class="brand-mark">✓</div>
+        <div class="brand-text">
+          <h1>TaskTrack</h1>
+          <span>Sign in to sync across your devices</span>
+        </div>
+      </div>
+      <form id="authForm" class="auth-form">
+        <label class="field">
+          <span>Your email</span>
+          <input type="email" id="authEmail" required placeholder="you@example.com" autocomplete="email" />
+        </label>
+        <button type="submit" class="primary-btn wide" id="authSubmit">Send me a login link</button>
+      </form>
+      <p class="auth-msg" id="authMsg" hidden></p>
+      <p class="auth-hint">No password needed — we email you a secure one-time link.</p>
+    </div>
+  </div>
+
+  <div class="app" id="app" hidden>
     <!-- ===== Sidebar ===== -->
     <aside class="sidebar">
       <div class="brand">
@@ -56,9 +84,19 @@
       </nav>
 
       <div class="sidebar-footer">
-        <button class="ghost-btn" id="exportBtn" title="Download a backup of all your tasks">⬇ Export</button>
-        <button class="ghost-btn" id="importBtn" title="Restore tasks from a backup file">⬆ Import</button>
-        <input type="file" id="importFile" accept="application/json" hidden />
+        <div class="account" id="account" hidden>
+          <div class="account-avatar" id="accountAvatar">?</div>
+          <div class="account-info">
+            <span class="account-email" id="accountEmail"></span>
+            <span class="account-role" id="accountRole"></span>
+          </div>
+          <button class="row-edit" id="signOutBtn" title="Sign out" aria-label="Sign out">⎋</button>
+        </div>
+        <div class="footer-actions">
+          <button class="ghost-btn" id="exportBtn" title="Download a backup of all your tasks">⬇ Export</button>
+          <button class="ghost-btn" id="importBtn" title="Restore tasks from a backup file">⬆ Import</button>
+          <input type="file" id="importFile" accept="application/json" hidden />
+        </div>
       </div>
     </aside>
 
@@ -173,8 +211,25 @@
     </div>
   </div>
 
+  <!-- Local-tasks upload prompt (first cloud login on a device with local tasks) -->
+  <div class="modal-overlay" id="uploadOverlay" hidden>
+    <div class="modal modal-sm" role="dialog" aria-modal="true">
+      <div class="modal-head"><h3>Move your tasks to the cloud?</h3></div>
+      <div class="modal-body">
+        <p class="upload-text" id="uploadText"></p>
+        <div class="modal-foot">
+          <div class="spacer"></div>
+          <button type="button" class="ghost-btn" id="uploadSkip">Not now</button>
+          <button type="button" class="primary-btn" id="uploadGo">Upload</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast" hidden></div>
 
+  <script src="vendor/supabase.js"></script>
+  <script src="supabase-config.js"></script>
   <script src="app.js"></script>
   <script>
     // Register the service worker so the app installs and works offline.

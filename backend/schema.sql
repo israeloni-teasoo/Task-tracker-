@@ -130,6 +130,8 @@ $$;
 -- On sign-up, create a profile and give the 'requester' role by default.
 create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  assigned app_role := 'requester';
 begin
   insert into public.profiles (id, full_name, email, avatar_url)
   values (
@@ -139,8 +141,14 @@ begin
     new.raw_user_meta_data->>'avatar_url'
   ) on conflict (id) do nothing;
 
+  -- The very first person to sign in becomes the Owner (bootstraps the boss);
+  -- everyone after that defaults to Requester until the Owner promotes them.
+  if not exists (select 1 from public.memberships where role = 'owner') then
+    assigned := 'owner';
+  end if;
+
   insert into public.memberships (user_id, role)
-  values (new.id, 'requester') on conflict (user_id) do nothing;
+  values (new.id, assigned) on conflict (user_id) do nothing;
 
   return new;
 end;
@@ -245,6 +253,13 @@ create policy push_own on public.push_subscriptions for all
 -- reminders: staff (editor+) manage reminders.
 create policy reminders_staff on public.reminders for all
   using (public.can_edit()) with check (public.can_edit());
+
+-- ---------- Enable realtime (live cross-device sync) ----------
+-- Adds these tables to Supabase's realtime publication so the app receives
+-- live INSERT/UPDATE/DELETE events. (RLS still governs what each client sees.)
+alter publication supabase_realtime add table public.tasks;
+alter publication supabase_realtime add table public.projects;
+alter publication supabase_realtime add table public.task_events;
 
 -- ---------- Seed the starter projects ----------
 insert into public.projects (name, color, is_default, position) values

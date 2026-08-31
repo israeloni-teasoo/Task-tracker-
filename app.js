@@ -1,16 +1,25 @@
 /* ============================================================
-   TaskTrack — application logic
-   Vanilla JS, no dependencies. State persists in localStorage.
-   Tasks belong to Projects (default: "Work").
+   TaskTrack — application logic (cloud sync)
+   Login (email magic-link) + Supabase-backed tasks & projects
+   with realtime sync across devices. Falls back to a read-only
+   local cache when offline.
    ============================================================ */
 
 (function () {
   "use strict";
 
-  const STORAGE_KEY = "tasktrack.v2";
-  const OLD_KEY = "tasktrack.v1";
+  // ---- Supabase client ----
+  const CFG = window.TASKTRACK_SUPABASE || {};
+  const sb = (window.supabase && CFG.url)
+    ? window.supabase.createClient(CFG.url, CFG.anonKey, {
+        auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+      })
+    : null;
+  const PROJECT_REF = (CFG.url || "").replace(/^https?:\/\//, "").split(".")[0];
+  const CACHE_KEY = "tasktrack.cache";
+  const LOCAL_KEY = "tasktrack.v2";   // legacy on-device tasks (for optional upload)
 
-  // Board columns, in display order. `key` matches task.status.
+  // ---- Board columns ----
   const STATUSES = [
     { key: "pending",    label: "Pending",     color: "var(--s-pending)" },
     { key: "inprogress", label: "In Progress", color: "var(--s-inprogress)" },
@@ -19,134 +28,201 @@
     { key: "completed",  label: "Completed",   color: "var(--s-completed)" },
   ];
   const statusLabel = (k) => (STATUSES.find((s) => s.key === k) || {}).label || k;
-
-  // Colour palette offered when creating a project.
   const PALETTE = ["#3b82f6", "#a855f7", "#22c55e", "#f59e0b", "#ef4444", "#14b8a6", "#ec4899", "#6366f1"];
+  const ROLE_LABEL = { owner: "Owner", delegate: "Delegate", editor: "Editor", viewer: "Viewer", requester: "Requester" };
 
   // ---- State ----
-  let store = load();            // { projects: [...], tasks: [...] }
-  let projects = store.projects;
-  let tasks = store.tasks;
-  let scope = "all";             // all | today | overdue | project:<id>
-  let view = "list";             // list | board  (list is the default)
-  let query = "";
+  let projects = [], tasks = [];
+  let me = null, myRole = "requester";
+  let scope = "all", view = "list", query = "";
+  let appReady = false, realtimeChannel = null;
 
   // ---- Elements ----
-  const boardView = document.getElementById("boardView");
-  const listView = document.getElementById("listView");
-  const viewTitle = document.getElementById("viewTitle");
-  const searchInput = document.getElementById("search");
-  const toastEl = document.getElementById("toast");
-  const projectListEl = document.getElementById("projectList");
+  const $ = (id) => document.getElementById(id);
+  const bootEl = $("bootLoading"), authScreen = $("authScreen"), appEl = $("app");
+  const boardView = $("boardView"), listView = $("listView"), viewTitle = $("viewTitle");
+  const searchInput = $("search"), toastEl = $("toast"), projectListEl = $("projectList");
+
+  const can = {
+    edit: () => ["owner", "delegate", "editor"].includes(myRole),
+    delete: () => ["owner", "delegate"].includes(myRole),
+    staff: () => ["owner", "delegate", "editor", "viewer"].includes(myRole),
+  };
 
   // ============================================================
-  //  Persistence + migration
+  //  Mapping between DB rows (snake_case) and app objects
   // ============================================================
-  function load() {
-    // v2 (projects) format
+  const taskFromRow = (r) => ({
+    id: r.id, title: r.title, notes: r.notes || "", projectId: r.project_id,
+    priority: r.priority, status: r.status, due: r.due || "",
+    source: r.source, requesterId: r.requester_id, created: r.created_at,
+  });
+  const rowFromTask = (t) => ({
+    title: t.title, notes: t.notes, project_id: t.projectId || null,
+    priority: t.priority, status: t.status, due: t.due || null,
+  });
+  const projFromRow = (r) => ({ id: r.id, name: r.name, color: r.color, isDefault: r.is_default, position: r.position });
+
+  // ============================================================
+  //  Boot & auth
+  // ============================================================
+  async function boot() {
+    if (!sb) { fatal("Cloud config missing. Check supabase-config.js and vendor/supabase.js."); return; }
+    let session = null;
+    try { session = (await sb.auth.getSession()).data.session; } catch (e) { /* offline */ }
+    if (session) await enterApp(session);
+    else showAuth();
+
+    sb.auth.onAuthStateChange((event, sess) => {
+      if (event === "SIGNED_IN" && sess) enterApp(sess);
+      else if (event === "SIGNED_OUT") location.reload();
+    });
+  }
+
+  function show(el) { el.hidden = false; }
+  function hide(el) { el.hidden = true; }
+
+  function showAuth() {
+    hide(bootEl); hide(appEl); show(authScreen);
+    $("authEmail").focus();
+  }
+
+  function fatal(msg) {
+    hide(bootEl);
+    document.body.insertAdjacentHTML("beforeend",
+      `<div class="toast" style="background:#ef4444;color:#fff">${esc(msg)}</div>`);
+  }
+
+  async function enterApp(session) {
+    if (appReady) return;         // guard against duplicate SIGNED_IN events
+    appReady = true;
+    me = session.user;
+    hide(authScreen); hide(bootEl); show(appEl);
+    renderAccount();
+    await loadRole();
+    renderAccount();
+    await Promise.all([loadProjects(), loadTasks()]);
+    saveCache();
+    subscribeRealtime();
+    render();
+    maybeOfferLocalUpload();
+  }
+
+  // ---- Login form ----
+  $("authForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const email = $("authEmail").value.trim();
+    if (!email) return;
+    const btn = $("authSubmit");
+    btn.disabled = true; btn.textContent = "Sending…";
+    const { error } = await sb.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: location.href.split("#")[0] },
+    });
+    btn.disabled = false; btn.textContent = "Send me a login link";
+    const msg = $("authMsg");
+    msg.hidden = false;
+    if (error) { msg.className = "auth-msg err"; msg.textContent = error.message; }
+    else { msg.className = "auth-msg ok"; msg.textContent = `Check ${email} for your login link.`; }
+  });
+
+  $("signOutBtn").addEventListener("click", async () => { await sb.auth.signOut(); });
+
+  function renderAccount() {
+    if (!me) return;
+    const acc = $("account");
+    acc.hidden = false;
+    const email = me.email || "";
+    $("accountEmail").textContent = email;
+    $("accountRole").textContent = ROLE_LABEL[myRole] || myRole;
+    $("accountAvatar").textContent = (email[0] || "?").toUpperCase();
+  }
+
+  // ============================================================
+  //  Data loads
+  // ============================================================
+  async function loadRole() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && Array.isArray(parsed.projects) && Array.isArray(parsed.tasks)) {
-          return normalize(parsed);
-        }
-      }
-    } catch (e) { console.warn("Could not read saved data:", e); }
+      const { data } = await sb.from("memberships").select("role").eq("user_id", me.id).maybeSingle();
+      if (data && data.role) myRole = data.role;
+    } catch (e) { /* keep default */ }
+  }
 
-    // migrate a v1 (category-based) list if present
+  async function loadProjects() {
     try {
-      const old = localStorage.getItem(OLD_KEY);
-      if (old) {
-        const oldTasks = JSON.parse(old);
-        if (Array.isArray(oldTasks)) return migrateV1(oldTasks);
-      }
-    } catch (e) { console.warn("Could not migrate old data:", e); }
-
-    return seed();
+      const { data, error } = await sb.from("projects").select("*").order("position");
+      if (error) throw error;
+      projects = (data || []).map(projFromRow);
+    } catch (e) { fromCache("projects"); }
   }
 
-  // Ensure every task points at a real project; guarantee a default project.
-  function normalize(data) {
-    if (!data.projects.length) data.projects = defaultProjects();
-    if (!data.projects.some((p) => p.isDefault)) data.projects[0].isDefault = true;
-    const ids = new Set(data.projects.map((p) => p.id));
-    const def = defaultProjectId(data.projects);
-    data.tasks.forEach((t) => { if (!ids.has(t.projectId)) t.projectId = def; });
-    return data;
+  async function loadTasks() {
+    try {
+      const { data, error } = await sb.from("tasks").select("*").order("created_at", { ascending: false });
+      if (error) throw error;
+      tasks = (data || []).map(taskFromRow);
+    } catch (e) { fromCache("tasks"); }
   }
 
-  function migrateV1(oldTasks) {
-    const projs = defaultProjects();   // Work (default) + Personal
-    const workId = projs[0].id, personalId = projs[1].id;
-    const migrated = oldTasks.map((t) => ({
-      id: t.id || uid(),
-      title: t.title,
-      notes: t.notes || "",
-      projectId: t.category === "personal" ? personalId : workId,
-      priority: t.priority || "medium",
-      status: t.status || "pending",
-      due: t.due || "",
-      created: t.created || Date.now(),
-    }));
-    return { projects: projs, tasks: migrated };
+  function saveCache() {
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ projects, tasks })); } catch (e) {}
+  }
+  function fromCache(which) {
+    try {
+      const c = JSON.parse(localStorage.getItem(CACHE_KEY) || "{}");
+      if (which === "projects" && Array.isArray(c.projects)) projects = c.projects;
+      if (which === "tasks" && Array.isArray(c.tasks)) tasks = c.tasks;
+    } catch (e) {}
   }
 
-  function save() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects, tasks })); }
-    catch (e) { console.warn("Could not save:", e); }
-  }
-
-  function defaultProjects() {
-    return [
-      { id: uid(), name: "Work", color: "#3b82f6", isDefault: true },
-      { id: uid(), name: "Personal", color: "#a855f7", isDefault: false },
-    ];
-  }
-  function defaultProjectId(list) {
-    const p = (list || projects).find((x) => x.isDefault) || (list || projects)[0];
-    return p ? p.id : null;
-  }
   const projectById = (id) => projects.find((p) => p.id === id);
+  const defaultProject = () => projects.find((p) => p.isDefault) || projects[0];
 
-  // First-run sample data so the board isn't empty.
-  function seed() {
-    const projs = defaultProjects();
-    const workId = projs[0].id, personalId = projs[1].id;
-    const today = new Date();
-    const iso = (o) => { const d = new Date(today); d.setDate(d.getDate() + o); return d.toISOString().slice(0, 10); };
-    const tasks = [
-      { id: uid(), title: "Prepare board meeting deck", notes: "Q3 numbers + hiring plan slides.", projectId: workId, priority: "high", status: "inprogress", due: iso(1), created: Date.now() },
-      { id: uid(), title: "Approve marketing budget", notes: "Waiting on finance sign-off.", projectId: workId, priority: "high", status: "blocked", due: iso(0), created: Date.now() },
-      { id: uid(), title: "Reply to investor email", notes: "", projectId: workId, priority: "medium", status: "pending", due: iso(2), created: Date.now() },
-      { id: uid(), title: "Book dentist appointment", notes: "Prefer a morning slot.", projectId: personalId, priority: "low", status: "pending", due: "", created: Date.now() },
-      { id: uid(), title: "Renew car insurance", notes: "Compare 2–3 quotes first.", projectId: personalId, priority: "medium", status: "onhold", due: iso(5), created: Date.now() },
-      { id: uid(), title: "Sign off Q2 report", notes: "", projectId: workId, priority: "medium", status: "completed", due: iso(-2), created: Date.now() },
-    ];
-    return { projects: projs, tasks };
+  // ============================================================
+  //  Realtime
+  // ============================================================
+  function subscribeRealtime() {
+    if (!sb || realtimeChannel) return;
+    try {
+      realtimeChannel = sb.channel("db-changes")
+        .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, (p) => applyChange("task", p))
+        .on("postgres_changes", { event: "*", schema: "public", table: "projects" }, (p) => applyChange("project", p))
+        .subscribe();
+    } catch (e) { /* realtime is best-effort */ }
   }
 
-  function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+  function applyChange(kind, payload) {
+    const arr = kind === "task" ? tasks : projects;
+    const map = kind === "task" ? taskFromRow : projFromRow;
+    if (payload.eventType === "DELETE") {
+      const id = payload.old.id;
+      const i = arr.findIndex((x) => x.id === id);
+      if (i >= 0) arr.splice(i, 1);
+    } else {
+      const obj = map(payload.new);
+      const i = arr.findIndex((x) => x.id === obj.id);
+      if (i >= 0) arr[i] = obj; else arr.unshift(obj);
+    }
+    saveCache();
+    render();
+  }
 
   // ============================================================
   //  Date helpers
   // ============================================================
-  function todayStr() { return new Date().toISOString().slice(0, 10); }
+  const todayStr = () => new Date().toISOString().slice(0, 10);
   function dueState(due) {
     if (!due) return "";
     const t = todayStr();
-    if (due < t) return "overdue";
-    if (due === t) return "today";
-    return "future";
+    return due < t ? "overdue" : due === t ? "today" : "future";
   }
   function formatDue(due) {
     if (!due) return "";
-    const d = new Date(due + "T00:00:00");
-    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    return new Date(due + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
   }
 
   // ============================================================
-  //  Filtering
+  //  Filtering + rendering  (unchanged view logic)
   // ============================================================
   function visibleTasks() {
     return tasks.filter((t) => {
@@ -161,31 +237,36 @@
     });
   }
 
-  // ============================================================
-  //  Rendering
-  // ============================================================
   function render() {
     renderSidebarProjects();
     updateCounts();
-    if (view === "board") { boardView.hidden = false; listView.hidden = true; renderBoard(); }
-    else { boardView.hidden = true; listView.hidden = false; renderList(); }
+    reflectPermissions();
+    if (view === "board") { show(boardView); hide(listView); renderBoard(); }
+    else { hide(boardView); show(listView); renderList(); }
+  }
+
+  // Hide create/edit affordances for read-only roles (viewer / requester).
+  function reflectPermissions() {
+    const editor = can.edit();
+    $("newTaskBtn").style.display = editor ? "" : "none";
+    $("newProjectBtn").style.display = editor ? "" : "none";
   }
 
   function renderSidebarProjects() {
     projectListEl.innerHTML = projects.map((p) => {
       const n = tasks.filter((t) => t.projectId === p.id).length;
       const active = scope === "project:" + p.id ? "active" : "";
+      const edit = can.edit() ? `<button class="row-edit" data-edit="${p.id}" title="Edit project">⋯</button>` : "";
       return `
-        <div class="project-row ${active}" data-project="${p.id}">
+        <div class="project-row ${active}">
           <button class="filter-btn project-btn" data-scope="project:${p.id}">
             <span class="dot" style="background:${p.color}"></span>
             <span class="project-name">${esc(p.name)}</span>
             <span class="count">${n}</span>
           </button>
-          <button class="row-edit" data-edit="${p.id}" title="Edit project" aria-label="Edit project">⋯</button>
+          ${edit}
         </div>`;
     }).join("");
-
     projectListEl.querySelectorAll(".project-btn").forEach((btn) => {
       btn.addEventListener("click", () => setScope(btn.dataset.scope, btn.querySelector(".project-name").textContent));
     });
@@ -208,39 +289,27 @@
     let today = 0, overdue = 0;
     tasks.forEach((t) => {
       const ds = dueState(t.due);
-      if (ds === "today") today++;
-      if (ds === "overdue") overdue++;
+      if (ds === "today") today++; if (ds === "overdue") overdue++;
     });
-    setCount("all", tasks.length);
-    setCount("today", today);
-    setCount("overdue", overdue);
+    setCount("all", tasks.length); setCount("today", today); setCount("overdue", overdue);
   }
-  function setCount(key, n) {
-    const el = document.querySelector(`[data-count="${key}"]`);
-    if (el) el.textContent = n;
-  }
+  function setCount(k, n) { const el = document.querySelector(`[data-count="${k}"]`); if (el) el.textContent = n; }
 
   function projectChip(t) {
     const p = projectById(t.projectId);
-    if (!p) return "";
-    return `<span class="chip project-chip" style="--pc:${p.color}">${esc(p.name)}</span>`;
+    return p ? `<span class="chip project-chip" style="--pc:${p.color}">${esc(p.name)}</span>` : "";
   }
 
   function cardMarkup(t) {
     const ds = dueState(t.due);
-    const dueChip = t.due
-      ? `<span class="chip due ${ds === "overdue" ? "overdue" : ds === "today" ? "today" : ""}">📅 ${formatDue(t.due)}</span>`
-      : "";
+    const dueChip = t.due ? `<span class="chip due ${ds === "overdue" ? "overdue" : ds === "today" ? "today" : ""}">📅 ${formatDue(t.due)}</span>` : "";
     const notes = t.notes ? `<div class="card-notes">${esc(t.notes)}</div>` : "";
+    const drag = can.edit() ? 'draggable="true"' : "";
     return `
-      <div class="card prio-${t.priority} ${t.status === "completed" ? "done" : ""}" draggable="true" data-id="${t.id}">
+      <div class="card prio-${t.priority} ${t.status === "completed" ? "done" : ""}" ${drag} data-id="${t.id}">
         <div class="card-title">${esc(t.title)}</div>
         ${notes}
-        <div class="card-meta">
-          ${projectChip(t)}
-          <span class="chip prio ${t.priority}">${t.priority}</span>
-          ${dueChip}
-        </div>
+        <div class="card-meta">${projectChip(t)}<span class="chip prio ${t.priority}">${t.priority}</span>${dueChip}</div>
       </div>`;
   }
 
@@ -248,19 +317,14 @@
     const list = visibleTasks();
     boardView.innerHTML = STATUSES.map((s) => {
       const items = list.filter((t) => t.status === s.key);
-      const cards = items.length ? items.map(cardMarkup).join("") : `<div class="col-empty">Drop tasks here</div>`;
+      const cards = items.length ? items.map(cardMarkup).join("") : `<div class="col-empty">No tasks</div>`;
       return `
         <div class="column" data-status="${s.key}">
-          <div class="column-head">
-            <span class="status-dot" style="background:${s.color}"></span>
-            ${s.label}
-            <span class="col-count">${items.length}</span>
-          </div>
+          <div class="column-head"><span class="status-dot" style="background:${s.color}"></span>${s.label}<span class="col-count">${items.length}</span></div>
           <div class="column-body">${cards}</div>
         </div>`;
     }).join("");
-    wireCards();
-    wireColumns();
+    wireCards(); wireColumns();
   }
 
   function renderList() {
@@ -271,9 +335,7 @@
       if (!items.length) return "";
       const rows = items.map((t) => {
         const ds = dueState(t.due);
-        const dueChip = t.due
-          ? `<span class="chip due ${ds === "overdue" ? "overdue" : ds === "today" ? "today" : ""}">📅 ${formatDue(t.due)}</span>`
-          : "";
+        const dueChip = t.due ? `<span class="chip due ${ds === "overdue" ? "overdue" : ds === "today" ? "today" : ""}">📅 ${formatDue(t.due)}</span>` : "";
         return `
           <div class="list-row prio-${t.priority} ${t.status === "completed" ? "done" : ""}" data-id="${t.id}">
             <div class="list-check" data-check="${t.id}" title="Toggle complete">✓</div>
@@ -281,19 +343,12 @@
               <div class="list-title">${esc(t.title)}</div>
               ${t.notes ? `<div class="list-sub">${esc(t.notes)}</div>` : ""}
             </div>
-            <div class="list-meta">
-              ${projectChip(t)}
-              <span class="chip prio ${t.priority}">${t.priority}</span>
-              ${dueChip}
-            </div>
+            <div class="list-meta">${projectChip(t)}<span class="chip prio ${t.priority}">${t.priority}</span>${dueChip}</div>
           </div>`;
       }).join("");
       return `
         <div class="list-group">
-          <div class="list-group-head">
-            <span class="status-dot" style="background:${s.color}"></span>
-            ${s.label} <span class="col-count">· ${items.length}</span>
-          </div>
+          <div class="list-group-head"><span class="status-dot" style="background:${s.color}"></span>${s.label} <span class="col-count">· ${items.length}</span></div>
           ${rows}
         </div>`;
     }).join("");
@@ -301,11 +356,7 @@
   }
 
   function emptyState() {
-    return `
-      <div class="empty-state">
-        <div class="big">🗒️</div>
-        <p>${query ? "No tasks match your search." : "No tasks here yet. Hit <strong>＋ New task</strong> to add one."}</p>
-      </div>`;
+    return `<div class="empty-state"><div class="big">🗒️</div><p>${query ? "No tasks match your search." : (can.edit() ? "No tasks here yet. Hit <strong>＋ New task</strong> to add one." : "Nothing to show yet.")}</p></div>`;
   }
 
   // ============================================================
@@ -314,6 +365,7 @@
   function wireCards() {
     boardView.querySelectorAll(".card").forEach((card) => {
       card.addEventListener("click", () => openModal(card.dataset.id));
+      if (!can.edit()) return;
       card.addEventListener("dragstart", (e) => {
         card.classList.add("dragging");
         e.dataTransfer.setData("text/plain", card.dataset.id);
@@ -324,17 +376,16 @@
   }
 
   function wireColumns() {
+    if (!can.edit()) return;
     boardView.querySelectorAll(".column").forEach((col) => {
       col.addEventListener("dragover", (e) => { e.preventDefault(); col.classList.add("drag-over"); });
       col.addEventListener("dragleave", () => col.classList.remove("drag-over"));
-      col.addEventListener("drop", (e) => {
-        e.preventDefault();
-        col.classList.remove("drag-over");
+      col.addEventListener("drop", async (e) => {
+        e.preventDefault(); col.classList.remove("drag-over");
         const id = e.dataTransfer.getData("text/plain");
         const task = tasks.find((t) => t.id === id);
         if (task && task.status !== col.dataset.status) {
-          task.status = col.dataset.status;
-          save(); render();
+          await updateTask(id, { status: col.dataset.status });
           toast(`Moved to ${statusLabel(col.dataset.status)}`);
         }
       });
@@ -343,157 +394,176 @@
 
   function wireList() {
     listView.querySelectorAll(".list-row").forEach((row) => {
-      row.addEventListener("click", (e) => {
-        if (e.target.closest("[data-check]")) return;
-        openModal(row.dataset.id);
-      });
+      row.addEventListener("click", (e) => { if (!e.target.closest("[data-check]")) openModal(row.dataset.id); });
     });
     listView.querySelectorAll("[data-check]").forEach((chk) => {
-      chk.addEventListener("click", (e) => {
+      chk.addEventListener("click", async (e) => {
         e.stopPropagation();
+        if (!can.edit()) { toast("You don't have edit access"); return; }
         const task = tasks.find((t) => t.id === chk.dataset.check);
         if (!task) return;
-        task.status = task.status === "completed" ? "pending" : "completed";
-        save(); render();
+        await updateTask(task.id, { status: task.status === "completed" ? "pending" : "completed" });
       });
     });
+  }
+
+  // ============================================================
+  //  Task mutations (Supabase)
+  // ============================================================
+  async function createTask(data) {
+    const row = { ...rowFromTask(data), source: "internal", created_by: me.id };
+    const { data: inserted, error } = await sb.from("tasks").insert(row).select().single();
+    if (error) return failWrite(error);
+    upsertLocal(tasks, taskFromRow(inserted)); saveCache(); render();
+  }
+  async function updateTask(id, patch) {
+    const task = tasks.find((t) => t.id === id);
+    const merged = { ...task, ...patch };
+    const { data: updated, error } = await sb.from("tasks").update(rowFromTask(merged)).eq("id", id).select().single();
+    if (error) return failWrite(error);
+    upsertLocal(tasks, taskFromRow(updated)); saveCache(); render();
+  }
+  async function deleteTask(id) {
+    const { error } = await sb.from("tasks").delete().eq("id", id);
+    if (error) return failWrite(error);
+    const i = tasks.findIndex((t) => t.id === id); if (i >= 0) tasks.splice(i, 1);
+    saveCache(); render();
+  }
+
+  async function createProject(name, color) {
+    const row = { name, color, is_default: false, position: projects.length, created_by: me.id };
+    const { data, error } = await sb.from("projects").insert(row).select().single();
+    if (error) return failWrite(error);
+    upsertLocal(projects, projFromRow(data)); saveCache(); render();
+  }
+  async function updateProject(id, patch) {
+    const { data, error } = await sb.from("projects").update(patch).eq("id", id).select().single();
+    if (error) return failWrite(error);
+    upsertLocal(projects, projFromRow(data)); saveCache(); render();
+  }
+  async function deleteProject(id) {
+    const home = defaultProject();
+    if (home) await sb.from("tasks").update({ project_id: home.id }).eq("project_id", id);
+    const { error } = await sb.from("projects").delete().eq("id", id);
+    if (error) return failWrite(error);
+    const i = projects.findIndex((p) => p.id === id); if (i >= 0) projects.splice(i, 1);
+    tasks.forEach((t) => { if (t.projectId === id && home) t.projectId = home.id; });
+    saveCache(); render();
+  }
+
+  function upsertLocal(arr, obj) {
+    const i = arr.findIndex((x) => x.id === obj.id);
+    if (i >= 0) arr[i] = obj; else arr.unshift(obj);
+  }
+  function failWrite(error) {
+    console.warn("Write failed:", error);
+    toast(navigator.onLine ? (error.message || "Could not save") : "You're offline — change not saved");
   }
 
   // ============================================================
   //  Task modal
   // ============================================================
-  const overlay = document.getElementById("modalOverlay");
-  const form = document.getElementById("taskForm");
-  const deleteBtn = document.getElementById("deleteTask");
-  const projectSelect = document.getElementById("fProject");
+  const overlay = $("modalOverlay"), form = $("taskForm"), deleteBtn = $("deleteTask"), projectSelect = $("fProject");
 
   function fillProjectOptions(selectedId) {
-    projectSelect.innerHTML = projects
-      .map((p) => `<option value="${p.id}" ${p.id === selectedId ? "selected" : ""}>${esc(p.name)}</option>`)
-      .join("");
+    projectSelect.innerHTML = projects.map((p) =>
+      `<option value="${p.id}" ${p.id === selectedId ? "selected" : ""}>${esc(p.name)}</option>`).join("");
   }
 
   function openModal(id) {
-    const editing = Boolean(id);
-    const t = editing ? tasks.find((x) => x.id === id) : null;
-    // Default project = the currently-filtered project, else the default (Work).
-    const scopedProject = scope.startsWith("project:") ? scope.slice(8) : defaultProjectId();
-    document.getElementById("modalTitle").textContent = editing ? "Edit task" : "New task";
-    document.getElementById("taskId").value = editing ? id : "";
-    document.getElementById("fTitle").value = t ? t.title : "";
-    document.getElementById("fNotes").value = t ? t.notes || "" : "";
-    fillProjectOptions(t ? t.projectId : scopedProject);
-    document.getElementById("fPriority").value = t ? t.priority : "medium";
-    document.getElementById("fStatus").value = t ? t.status : "pending";
-    document.getElementById("fDue").value = t ? t.due || "" : "";
-    deleteBtn.hidden = !editing;
-    overlay.hidden = false;
-    setTimeout(() => document.getElementById("fTitle").focus(), 30);
+    const t = id ? tasks.find((x) => x.id === id) : null;
+    if (t && !can.edit()) return;   // read-only roles can't open the editor
+    const scoped = scope.startsWith("project:") ? scope.slice(8) : (defaultProject() || {}).id;
+    $("modalTitle").textContent = t ? "Edit task" : "New task";
+    $("taskId").value = t ? id : "";
+    $("fTitle").value = t ? t.title : "";
+    $("fNotes").value = t ? t.notes || "" : "";
+    fillProjectOptions(t ? t.projectId : scoped);
+    $("fPriority").value = t ? t.priority : "medium";
+    $("fStatus").value = t ? t.status : "pending";
+    $("fDue").value = t ? t.due || "" : "";
+    deleteBtn.hidden = !t || !can.delete();
+    show(overlay);
+    setTimeout(() => $("fTitle").focus(), 30);
   }
-  function closeModal() { overlay.hidden = true; }
+  const closeModal = () => hide(overlay);
 
-  form.addEventListener("submit", (e) => {
+  form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const id = document.getElementById("taskId").value;
+    const id = $("taskId").value;
     const data = {
-      title: document.getElementById("fTitle").value.trim(),
-      notes: document.getElementById("fNotes").value.trim(),
-      projectId: projectSelect.value,
-      priority: document.getElementById("fPriority").value,
-      status: document.getElementById("fStatus").value,
-      due: document.getElementById("fDue").value,
+      title: $("fTitle").value.trim(), notes: $("fNotes").value.trim(),
+      projectId: projectSelect.value, priority: $("fPriority").value,
+      status: $("fStatus").value, due: $("fDue").value,
     };
     if (!data.title) return;
-    if (id) {
-      Object.assign(tasks.find((x) => x.id === id), data);
-      toast("Task updated");
-    } else {
-      tasks.unshift({ id: uid(), created: Date.now(), ...data });
-      toast("Task added");
-    }
-    save(); render(); closeModal();
+    closeModal();
+    if (id) { await updateTask(id, data); toast("Task updated"); }
+    else { await createTask(data); toast("Task added"); }
   });
 
-  deleteBtn.addEventListener("click", () => {
-    const id = document.getElementById("taskId").value;
+  deleteBtn.addEventListener("click", async () => {
+    const id = $("taskId").value;
     if (!id) return;
-    tasks = tasks.filter((t) => t.id !== id);
-    store.tasks = tasks;
-    save(); render(); closeModal();
+    closeModal();
+    await deleteTask(id);
     toast("Task deleted");
   });
 
-  document.getElementById("newTaskBtn").addEventListener("click", () => openModal(null));
-  document.getElementById("closeModal").addEventListener("click", closeModal);
-  document.getElementById("cancelTask").addEventListener("click", closeModal);
+  $("newTaskBtn").addEventListener("click", () => openModal(null));
+  $("closeModal").addEventListener("click", closeModal);
+  $("cancelTask").addEventListener("click", closeModal);
   overlay.addEventListener("click", (e) => { if (e.target === overlay) closeModal(); });
 
   // ============================================================
-  //  Project modal (create / edit / delete)
+  //  Project modal
   // ============================================================
-  const projectOverlay = document.getElementById("projectOverlay");
-  const projectForm = document.getElementById("projectForm");
-  const deleteProjectBtn = document.getElementById("deleteProject");
-  const swatchesEl = document.getElementById("pSwatches");
+  const projectOverlay = $("projectOverlay"), projectForm = $("projectForm");
+  const deleteProjectBtn = $("deleteProject"), swatchesEl = $("pSwatches");
   let pickedColor = PALETTE[0];
 
   function renderSwatches(selected) {
     pickedColor = selected;
     swatchesEl.innerHTML = PALETTE.map((c) =>
-      `<button type="button" class="swatch ${c === selected ? "sel" : ""}" data-color="${c}" style="background:${c}" aria-label="colour"></button>`
-    ).join("");
-    swatchesEl.querySelectorAll(".swatch").forEach((s) => {
-      s.addEventListener("click", () => renderSwatches(s.dataset.color));
-    });
+      `<button type="button" class="swatch ${c === selected ? "sel" : ""}" data-color="${c}" style="background:${c}"></button>`).join("");
+    swatchesEl.querySelectorAll(".swatch").forEach((s) => s.addEventListener("click", () => renderSwatches(s.dataset.color)));
   }
 
   function openProjectModal(id) {
-    const editing = Boolean(id);
-    const p = editing ? projectById(id) : null;
-    document.getElementById("projectModalTitle").textContent = editing ? "Edit project" : "New project";
-    document.getElementById("projectId").value = editing ? id : "";
-    document.getElementById("pName").value = p ? p.name : "";
+    const p = id ? projectById(id) : null;
+    $("projectModalTitle").textContent = p ? "Edit project" : "New project";
+    $("projectId").value = p ? id : "";
+    $("pName").value = p ? p.name : "";
     renderSwatches(p ? p.color : PALETTE[projects.length % PALETTE.length]);
-    // The default project (Work) can't be deleted — it's the fallback home for tasks.
-    deleteProjectBtn.hidden = !editing || (p && p.isDefault);
-    projectOverlay.hidden = false;
-    setTimeout(() => document.getElementById("pName").focus(), 30);
+    deleteProjectBtn.hidden = !p || p.isDefault;
+    show(projectOverlay);
+    setTimeout(() => $("pName").focus(), 30);
   }
-  function closeProjectModal() { projectOverlay.hidden = true; }
+  const closeProjectModal = () => hide(projectOverlay);
 
-  projectForm.addEventListener("submit", (e) => {
+  projectForm.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const id = document.getElementById("projectId").value;
-    const name = document.getElementById("pName").value.trim();
+    const id = $("projectId").value;
+    const name = $("pName").value.trim();
     if (!name) return;
-    if (id) {
-      const p = projectById(id);
-      p.name = name; p.color = pickedColor;
-      toast("Project updated");
-    } else {
-      projects.push({ id: uid(), name, color: pickedColor, isDefault: false });
-      toast("Project created");
-    }
-    save(); render(); closeProjectModal();
+    closeProjectModal();
+    if (id) { await updateProject(id, { name, color: pickedColor }); toast("Project updated"); }
+    else { await createProject(name, pickedColor); toast("Project created"); }
   });
 
-  deleteProjectBtn.addEventListener("click", () => {
-    const id = document.getElementById("projectId").value;
+  deleteProjectBtn.addEventListener("click", async () => {
+    const id = $("projectId").value;
     const p = projectById(id);
     if (!p || p.isDefault) return;
-    const home = defaultProjectId();
-    // Move this project's tasks back to the default project so none are orphaned.
-    tasks.forEach((t) => { if (t.projectId === id) t.projectId = home; });
-    projects = projects.filter((x) => x.id !== id);
-    store.projects = projects;
+    closeProjectModal();
     if (scope === "project:" + id) { scope = "all"; viewTitle.textContent = "All tasks"; }
-    save(); render(); closeProjectModal();
+    await deleteProject(id);
     toast("Project deleted — its tasks moved to the default project");
   });
 
-  document.getElementById("newProjectBtn").addEventListener("click", () => openProjectModal(null));
-  document.getElementById("closeProject").addEventListener("click", closeProjectModal);
-  document.getElementById("cancelProject").addEventListener("click", closeProjectModal);
+  $("newProjectBtn").addEventListener("click", () => openProjectModal(null));
+  $("closeProject").addEventListener("click", closeProjectModal);
+  $("cancelProject").addEventListener("click", closeProjectModal);
   projectOverlay.addEventListener("click", (e) => { if (e.target === projectOverlay) closeProjectModal(); });
 
   document.addEventListener("keydown", (e) => {
@@ -508,22 +578,18 @@
   document.querySelectorAll(".filters > .filter-btn").forEach((btn) => {
     btn.addEventListener("click", () => setScope(btn.dataset.scope, btn.textContent.trim().replace(/\s*\d+$/, "")));
   });
-
   document.querySelectorAll(".toggle-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       document.querySelectorAll(".toggle-btn").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      view = btn.dataset.view;
-      render();
+      btn.classList.add("active"); view = btn.dataset.view; render();
     });
   });
-
   searchInput.addEventListener("input", (e) => { query = e.target.value.trim().toLowerCase(); render(); });
 
   // ============================================================
-  //  Export / Import
+  //  Export / Import (client-side backup of the current view of data)
   // ============================================================
-  document.getElementById("exportBtn").addEventListener("click", () => {
+  $("exportBtn").addEventListener("click", () => {
     const blob = new Blob([JSON.stringify({ projects, tasks }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -531,51 +597,84 @@
     URL.revokeObjectURL(url);
     toast("Backup downloaded");
   });
-
-  const importFile = document.getElementById("importFile");
-  document.getElementById("importBtn").addEventListener("click", () => importFile.click());
-  importFile.addEventListener("change", (e) => {
+  const importFile = $("importFile");
+  $("importBtn").addEventListener("click", () => importFile.click());
+  importFile.addEventListener("change", async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const parsed = JSON.parse(reader.result);
-        let next;
-        if (Array.isArray(parsed)) next = migrateV1(parsed);              // old array backup
-        else if (parsed && Array.isArray(parsed.tasks)) next = normalize({ // new backup
-          projects: Array.isArray(parsed.projects) && parsed.projects.length ? parsed.projects : defaultProjects(),
-          tasks: parsed.tasks,
-        });
-        else throw new Error("bad format");
-        store = next; projects = next.projects; tasks = next.tasks;
-        scope = "all"; viewTitle.textContent = "All tasks";
-        save(); render();
-        toast("Tasks imported");
-      } catch (err) { toast("Could not read that file"); }
-    };
-    reader.readAsText(file);
+    if (!can.edit()) { toast("You don't have edit access"); importFile.value = ""; return; }
+    try {
+      const parsed = JSON.parse(await file.text());
+      const list = Array.isArray(parsed) ? parsed : parsed.tasks;
+      if (!Array.isArray(list)) throw new Error("bad format");
+      await uploadTasks(list, Array.isArray(parsed.projects) ? parsed.projects : []);
+      toast("Tasks imported to your account");
+    } catch (err) { toast("Could not read that file"); }
     importFile.value = "";
   });
+
+  // ============================================================
+  //  One-time: offer to upload legacy on-device tasks to the cloud
+  // ============================================================
+  function maybeOfferLocalUpload() {
+    if (!can.edit()) return;
+    let local = null;
+    try { local = JSON.parse(localStorage.getItem(LOCAL_KEY) || "null"); } catch (e) {}
+    if (!local || !Array.isArray(local.tasks) || !local.tasks.length) return;
+    if (tasks.length > 0) return;   // cloud already has tasks — don't duplicate
+    $("uploadText").textContent =
+      `This device has ${local.tasks.length} task(s) saved locally. Upload them to your account so they sync everywhere?`;
+    show($("uploadOverlay"));
+    $("uploadGo").onclick = async () => {
+      hide($("uploadOverlay"));
+      await uploadTasks(local.tasks, local.projects || []);
+      try { localStorage.removeItem(LOCAL_KEY); } catch (e) {}
+      toast("Uploaded to your account");
+    };
+    $("uploadSkip").onclick = () => hide($("uploadOverlay"));
+  }
+
+  // Insert a batch of tasks, mapping their projects by name (creating missing ones).
+  async function uploadTasks(list, srcProjects) {
+    const byName = {}; projects.forEach((p) => (byName[p.name.toLowerCase()] = p.id));
+    const srcById = {}; (srcProjects || []).forEach((p) => (srcById[p.id] = p));
+    const home = defaultProject();
+    for (const t of list) {
+      // resolve a project id in *our* workspace
+      let projId = home ? home.id : null;
+      const src = t.projectId ? srcById[t.projectId] : null;
+      const name = src ? src.name : (t.category === "personal" ? "Personal" : null);
+      if (name) {
+        const key = name.toLowerCase();
+        if (!byName[key]) {
+          await createProject(name, (src && src.color) || PALETTE[projects.length % PALETTE.length]);
+          const np = projects.find((p) => p.name.toLowerCase() === key);
+          if (np) byName[key] = np.id;
+        }
+        projId = byName[key] || projId;
+      }
+      await createTask({
+        title: t.title || "Untitled", notes: t.notes || "", projectId: projId,
+        priority: t.priority || "medium", status: t.status || "pending", due: t.due || "",
+      });
+    }
+  }
 
   // ============================================================
   //  Utilities
   // ============================================================
   function esc(s) {
-    return String(s).replace(/[&<>"']/g, (c) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
-  // Escape a value for use inside a CSS attribute selector.
   function cssEsc(s) { return String(s).replace(/["\\]/g, "\\$&"); }
 
   let toastTimer;
   function toast(msg) {
-    toastEl.textContent = msg;
-    toastEl.hidden = false;
+    toastEl.textContent = msg; toastEl.hidden = false;
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => (toastEl.hidden = true), 2400);
   }
 
   // ---- Go ----
-  render();
+  boot();
 })();

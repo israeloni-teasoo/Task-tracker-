@@ -54,29 +54,44 @@ needed to view or edit tasks.
 - **Board** — a Kanban layout. Each column is a status; drag cards to update.
 - **List** — a compact, grouped checklist with quick-complete checkboxes.
 
-## Data & privacy
+## Accounts & sync
 
-All tasks live in the browser's `localStorage` on the device you're using —
-nothing is sent anywhere, and there is no server. Because it's per-browser:
+Sign in with your email (a one-time magic link — no password) and your tasks
+live in your account, synced across every device in real time. Open the app on
+an iPhone, a Samsung and a laptop and you see the same board; a change on one
+shows on the others within seconds.
 
-- Use **Export** regularly if the tasks matter, and **Import** to restore or
-  move to another machine/browser.
-- Clearing browser data for the site will remove the tasks (keep a backup).
+Roles decide what each person can do (Owner, Delegate, Editor, Viewer,
+Requester) — see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). The first person
+to sign in becomes the **Owner**.
+
+Backend setup lives in `backend/` — run `schema.sql` once, then the files in
+`backend/migrations/` if you applied the schema before those features were added.
+
+**Offline:** the installed app keeps a local cache so you can still see your
+tasks without a connection; edits save once you're back online.
+
+**Backup:** **Export** downloads a JSON copy anytime; **Import** uploads tasks
+from a backup into your account.
 
 ## Project structure
 
 ```
 index.html            — markup / layout
 styles.css            — styling (light + dark, responsive)
-app.js                — all behaviour (state, board, list, drag & drop, storage)
+app.js                — all behaviour (auth, cloud sync, board, list, drag & drop)
+supabase-config.js    — Supabase URL + publishable key (safe for the browser)
+vendor/supabase.js    — Supabase client library (vendored for offline use)
 manifest.webmanifest  — PWA metadata (name, icons, colours)
 sw.js                 — service worker (offline support)
 icons/                — app icons
+backend/schema.sql    — database tables, roles & row-level security
+backend/migrations/   — incremental DB changes to apply on existing projects
 .nojekyll             — serve files as-is on GitHub Pages
 ```
 
-No build step, no dependencies, no framework. Edit and refresh; pushing to the
-default branch redeploys the hosted site automatically.
+No build step, no framework. Edit and refresh; pushing to the default branch
+redeploys the hosted site automatically.
 
 ## Hosting (one-time setup)
 
