@@ -478,6 +478,16 @@ body {
 }
 @keyframes rise { from { transform: translate(-50%, 10px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
 
+/* "Update available" banner */
+.update-banner {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: 24px; z-index: 120;
+  background: var(--c-accent); color: #fff; border: none; cursor: pointer;
+  padding: 12px 20px; border-radius: 24px; font-size: 13.5px; font-weight: 600;
+  font-family: inherit; box-shadow: var(--shadow-md); animation: rise .2s ease;
+}
+.update-banner:hover { filter: brightness(1.08); }
+@media (max-width: 760px) { .update-banner { bottom: 78px; } }  /* clear the bottom nav */
+
 /* ===== Scrollbars ===== */
 .column-body::-webkit-scrollbar, .list-view::-webkit-scrollbar, .board::-webkit-scrollbar { height: 8px; width: 8px; }
 .column-body::-webkit-scrollbar-thumb, .list-view::-webkit-scrollbar-thumb, .board::-webkit-scrollbar-thumb {

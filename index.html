@@ -403,23 +403,44 @@
 
   <div class="toast" id="toast" hidden></div>
 
+  <button class="update-banner" id="updateBanner" hidden>🔄 Update available — tap to refresh</button>
+
   <script src="vendor/supabase.js"></script>
   <script src="supabase-config.js"></script>
   <script src="app.js"></script>
   <script>
-    // Register the service worker (offline support) and keep it up to date so
-    // the installed app auto-updates — no need to remove and re-add it.
+    // Register the service worker (offline support) and surface an
+    // "Update available" banner when a new version is ready — the user taps to
+    // refresh, so a reload never interrupts them mid-task.
     if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-      let reloading = false;
-      // When a new service worker takes control, reload once to load new code.
+      let updateAccepted = false;
+      const banner = document.getElementById("updateBanner");
+
       navigator.serviceWorker.addEventListener("controllerchange", () => {
-        if (reloading) return;
-        reloading = true;
-        location.reload();
+        if (updateAccepted) location.reload();   // only after the user opted in
       });
+
+      function offerUpdate(reg) {
+        if (!reg.waiting || !banner) return;
+        banner.hidden = false;
+        banner.onclick = () => {
+          updateAccepted = true;
+          banner.hidden = true;
+          reg.waiting.postMessage({ type: "SKIP_WAITING" });
+        };
+      }
+
       window.addEventListener("load", () => {
         navigator.serviceWorker.register("sw.js").then((reg) => {
-          // Check for a new version now, when the app regains focus, and hourly.
+          if (reg.waiting) offerUpdate(reg);           // update already downloaded
+          reg.addEventListener("updatefound", () => {
+            const nw = reg.installing;
+            if (!nw) return;
+            nw.addEventListener("statechange", () => {
+              // Installed while an old worker still controls the page => it's an update.
+              if (nw.state === "installed" && navigator.serviceWorker.controller) offerUpdate(reg);
+            });
+          });
           reg.update();
           document.addEventListener("visibilitychange", () => {
             if (document.visibilityState === "visible") reg.update();
