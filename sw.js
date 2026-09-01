@@ -1,6 +1,9 @@
 /* TaskTrack service worker — offline support.
    Bump CACHE version whenever the cached files change so clients update. */
-const CACHE = "tasktrack-v4";
+const CACHE = "tasktrack-v5";
+// App-shell files served network-first so updates reach clients immediately when
+// online (fall back to cache when offline). Everything else is cache-first.
+const CORE = ["/", "/index.html", "/app.js", "/styles.css", "/request.html", "/request.js", "/supabase-config.js"];
 const ASSETS = [
   "./",
   "./index.html",
@@ -59,16 +62,30 @@ self.addEventListener("notificationclick", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+  const url = new URL(event.request.url);
+  const sameOrigin = url.origin === self.location.origin;
+  const isCore = sameOrigin && (event.request.mode === "navigate" || CORE.includes(url.pathname));
+
+  if (isCore) {
+    // Network-first: always try to get the latest, fall back to cache offline.
+    event.respondWith(
+      fetch(event.request)
+        .then((res) => {
+          if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(event.request, copy)); }
+          return res;
+        })
+        .catch(() => caches.match(event.request).then((c) => c || caches.match("./index.html")))
+    );
+    return;
+  }
+
+  // Cache-first for everything else (icons, vendored library, fonts…).
   event.respondWith(
     caches.match(event.request).then((cached) => {
       if (cached) return cached;
       return fetch(event.request)
         .then((res) => {
-          // Runtime-cache same-origin GETs so new files work offline next time.
-          if (res.ok && new URL(event.request.url).origin === self.location.origin) {
-            const copy = res.clone();
-            caches.open(CACHE).then((c) => c.put(event.request, copy));
-          }
+          if (res.ok && sameOrigin) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(event.request, copy)); }
           return res;
         })
         .catch(() => cached);

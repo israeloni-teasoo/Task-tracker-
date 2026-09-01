@@ -37,6 +37,7 @@
   let me = null, myRole = "requester";
   let scope = "all", view = "list", query = "";
   let appReady = false, realtimeChannel = null;
+  const seenTaskIds = new Set();   // for "new request" toasts
 
   // ---- Elements ----
   const $ = (id) => document.getElementById(id);
@@ -117,6 +118,7 @@
     show(appEl);
     renderAccount();
     await Promise.all([loadProjects(), loadTasks(), loadPeople()]);
+    primeSeen();               // seed before realtime so existing requests don't toast
     saveCache();
     subscribeRealtime();
     render();
@@ -280,6 +282,16 @@
   const projectById = (id) => projects.find((p) => p.id === id);
   const defaultProject = () => projects.find((p) => p.isDefault) || projects[0];
 
+  // Remember which tasks we've already seen so brand-new office requests can
+  // announce themselves with a toast.
+  function primeSeen() { seenTaskIds.clear(); tasks.forEach((t) => seenTaskIds.add(t.id)); }
+  function detectNewRequests() {
+    const fresh = tasks.filter((t) => t.source === "request" && !seenTaskIds.has(t.id));
+    tasks.forEach((t) => seenTaskIds.add(t.id));
+    if (!fresh.length) return;
+    toast(fresh.length === 1 ? `🔔 New request from ${requesterLabel(fresh[0])}` : `🔔 ${fresh.length} new requests`);
+  }
+
   // ============================================================
   //  Realtime
   // ============================================================
@@ -308,6 +320,7 @@
     if (myRole === "requester") { renderRequests(); return; }
     saveCache();
     render();
+    if (kind === "task") detectNewRequests();
   }
 
   // ============================================================
@@ -772,7 +785,7 @@
     document.querySelectorAll("#refreshBtn, #portalRefresh").forEach((b) => b.classList.add("spinning"));
     try {
       if (myRole === "requester") { await loadTasks(); renderRequests(); }
-      else { await Promise.all([loadTasks(), loadProjects()]); saveCache(); render(); }
+      else { await Promise.all([loadTasks(), loadProjects()]); saveCache(); render(); detectNewRequests(); }
       if (!silent) toast("Refreshed");
     } catch (e) {
       if (!silent) toast("Couldn't refresh — check your connection");
@@ -1002,7 +1015,7 @@
     list.innerHTML = mine.map((t) => {
       const done = t.status === "completed";
       const dueChip = t.due ? `<span class="chip due">📅 ${formatDue(t.due)}</span>` : "";
-      const nudged = t.needsAttention ? `<span class="chip attention-chip">Nudged</span>` : "";
+      const nudged = t.needsAttention ? `<span class="chip attention-chip">Reminder sent</span>` : "";
       return `
         <div class="request-row ${done ? "done" : ""}">
           <div class="request-main">
@@ -1013,19 +1026,19 @@
               ${dueChip}${nudged}
             </div>
           </div>
-          <button class="ghost-btn nudge-btn" data-nudge="${t.id}" ${done ? "disabled" : ""}>Nudge</button>
+          <button class="ghost-btn nudge-btn" data-nudge="${t.id}" ${done ? "disabled" : ""}>Send Reminder</button>
         </div>`;
     }).join("");
     list.querySelectorAll("[data-nudge]").forEach((b) => b.addEventListener("click", () => nudge(b.dataset.nudge)));
   }
 
   async function nudge(taskId) {
-    const { error } = await sb.from("task_events").insert({ task_id: taskId, user_id: me.id, type: "nudge", message: "Nudge" });
-    if (error) { toast(error.message || "Could not nudge"); return; }
+    const { error } = await sb.from("task_events").insert({ task_id: taskId, user_id: me.id, type: "nudge", message: "Reminder" });
+    if (error) { toast(error.message || "Could not send reminder"); return; }
     const t = tasks.find((x) => x.id === taskId);
     if (t) t.needsAttention = true;
     renderRequests();
-    toast("Nudge sent — they'll see it flagged");
+    toast("Reminder sent — they'll see it flagged");
   }
 
   // ============================================================

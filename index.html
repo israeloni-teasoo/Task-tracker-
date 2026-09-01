@@ -83,7 +83,7 @@
     <div class="portal-body">
       <section class="portal-new">
         <h2>Request something from the office</h2>
-        <p class="portal-hint">Log what you need. You'll be able to track its status here and nudge if it's taking too long.</p>
+        <p class="portal-hint">Log what you need. You'll be able to track its status here and send a reminder if it's taking too long.</p>
         <form id="requestForm">
           <label class="field">
             <span>What do you need?</span>
@@ -407,11 +407,25 @@
   <script src="supabase-config.js"></script>
   <script src="app.js"></script>
   <script>
-    // Register the service worker so the app installs and works offline.
-    // Only runs over http(s); harmlessly skipped when opened via file://.
+    // Register the service worker (offline support) and keep it up to date so
+    // the installed app auto-updates — no need to remove and re-add it.
     if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+      let reloading = false;
+      // When a new service worker takes control, reload once to load new code.
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (reloading) return;
+        reloading = true;
+        location.reload();
+      });
       window.addEventListener("load", () => {
-        navigator.serviceWorker.register("sw.js").catch((e) => console.warn("SW registration failed:", e));
+        navigator.serviceWorker.register("sw.js").then((reg) => {
+          // Check for a new version now, when the app regains focus, and hourly.
+          reg.update();
+          document.addEventListener("visibilitychange", () => {
+            if (document.visibilityState === "visible") reg.update();
+          });
+          setInterval(() => reg.update(), 60 * 60 * 1000);
+        }).catch((e) => console.warn("SW registration failed:", e));
       });
     }
   </script>

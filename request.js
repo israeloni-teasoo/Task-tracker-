@@ -85,7 +85,7 @@
           <div class="request-title">${esc(r.title)}</div>
           <div class="request-meta"><span class="status-badge s-pending" data-status>Checking…</span></div>
         </div>
-        <button class="ghost-btn nudge-btn" data-nudge="${esc(r.token)}" disabled>Nudge</button>
+        <button class="ghost-btn nudge-btn" data-nudge="${esc(r.token)}" disabled>Send Reminder</button>
       </div>`).join("");
 
     box.querySelectorAll("[data-nudge]").forEach((b) => b.addEventListener("click", () => nudge(b.dataset.nudge, b)));
@@ -102,8 +102,8 @@
         if (rec) {
           badge.textContent = STATUS_LABEL[rec.status] || rec.status;
           badge.className = "status-badge s-" + rec.status;
-          if (nudgeBtn) nudgeBtn.disabled = rec.status === "completed";   // can't nudge a done request
-          if (rec.needs_attention && nudgeBtn) nudgeBtn.textContent = "Nudged";
+          if (nudgeBtn) nudgeBtn.disabled = rec.status === "completed";   // can't remind on a done request
+          if (rec.needs_attention && nudgeBtn) nudgeBtn.textContent = "Reminder sent";
         } else {
           badge.textContent = "Not found";
         }
@@ -112,15 +112,20 @@
   }
 
   async function nudge(token, btn) {
-    if (btn) { btn.disabled = true; btn.textContent = "Nudging…"; }
+    if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
     const { data, error } = await sb.rpc("public_nudge", { token });
     if (error || data === false) {
-      if (btn) { btn.disabled = false; btn.textContent = "Nudge"; }
-      msg(error ? (error.message || "Could not nudge") : "That request can't be nudged.", true);
+      if (btn) { btn.disabled = false; btn.textContent = "Send Reminder"; }
+      let m = error ? (error.message || "Couldn't send the reminder.") : "That request can't be reminded (already completed).";
+      // Friendlier hint for the common "function not installed yet" case.
+      if (error && /public_nudge|function|schema cache/i.test(error.message || "")) {
+        m = "Reminders aren't switched on yet — the office admin needs to run migration 007.";
+      }
+      msg(m, true);
       return;
     }
-    if (btn) btn.textContent = "Nudged";
-    msg("👍 Nudge sent — they'll see it flagged.", false);
+    if (btn) btn.textContent = "Reminder sent";
+    msg("👍 Reminder sent — they'll see it flagged.", false);
   }
 
   function esc(s) {
