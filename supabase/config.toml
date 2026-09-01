@@ -1,0 +1,3 @@
+# Minimal Supabase CLI config. Run `supabase init` to regenerate a full one
+# with all default sections if you want local dev (`supabase start`).
+project_id = "task-tracker"

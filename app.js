@@ -345,6 +345,7 @@
       if (scope === "today" && dueState(t.due) !== "today") return false;
       if (scope === "overdue" && dueState(t.due) !== "overdue") return false;
       if (scope === "attention" && !t.needsAttention) return false;
+      if (scope === "completed" && t.status !== "completed") return false;
       if (scope.startsWith("project:") && t.projectId !== scope.slice(8)) return false;
       if (query) {
         const hay = (t.title + " " + (t.notes || "")).toLowerCase();
@@ -420,14 +421,15 @@
   }
 
   function updateCounts() {
-    let today = 0, overdue = 0, attention = 0;
+    let today = 0, overdue = 0, attention = 0, completed = 0;
     tasks.forEach((t) => {
       const ds = dueState(t.due);
       if (ds === "today") today++; if (ds === "overdue") overdue++;
       if (t.needsAttention) attention++;
+      if (t.status === "completed") completed++;
     });
     setCount("all", tasks.length); setCount("today", today);
-    setCount("overdue", overdue); setCount("attention", attention);
+    setCount("overdue", overdue); setCount("attention", attention); setCount("completed", completed);
     const badge = $("mAttnBadge");
     if (badge) { badge.textContent = attention; badge.hidden = attention === 0; }
   }
@@ -485,6 +487,7 @@
               ${t.notes ? `<div class="list-sub">${esc(t.notes)}</div>` : ""}
             </div>
             <div class="list-meta">${attentionChip(t)}${requestChip(t)}${projectChip(t)}<span class="chip prio ${t.priority}">${t.priority}</span>${dueChip}</div>
+            ${t.status === "completed" && can.edit() ? `<button class="ghost-btn restore-btn" data-restore="${t.id}" title="Bring this task back">↩ Restore</button>` : ""}
           </div>`;
       }).join("");
       return `
@@ -544,6 +547,13 @@
         const task = tasks.find((t) => t.id === chk.dataset.check);
         if (!task) return;
         await updateTask(task.id, { status: task.status === "completed" ? "pending" : "completed" });
+      });
+    });
+    listView.querySelectorAll("[data-restore]").forEach((btn) => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        await updateTask(btn.dataset.restore, { status: "pending" });
+        toast("Task restored to Pending");
       });
     });
   }
@@ -754,7 +764,7 @@
 
   // ---- Mobile bottom nav + "More" sheet ----
   const moreSheet = $("moreSheet");
-  const SCOPE_TITLE = { all: "All tasks", today: "Due today", overdue: "Overdue", attention: "Needs attention" };
+  const SCOPE_TITLE = { all: "All tasks", today: "Due today", overdue: "Overdue", attention: "Needs attention", completed: "Completed log" };
   function openSheet() { renderSidebarProjects(); show(moreSheet); }
   function closeSheet() { if (moreSheet) moreSheet.hidden = true; }
 

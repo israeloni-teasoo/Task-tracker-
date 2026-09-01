@@ -423,6 +423,8 @@ body {
 .list-sub { font-size: 12px; color: var(--c-text-faint); margin-top: 2px; }
 .list-meta { display: flex; align-items: center; gap: 8px; flex: none; }
 
+.restore-btn { flex: none; font-size: 12.5px; padding: 6px 12px; }
+
 .empty-state {
   text-align: center; color: var(--c-text-faint); padding: 60px 20px;
 }
