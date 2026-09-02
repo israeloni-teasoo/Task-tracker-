@@ -277,7 +277,9 @@ create policy tasks_insert_public on public.tasks for insert to anon
     and project_id is null
     and requester_name is not null
     and char_length(requester_name) between 1 and 120
+    and char_length(coalesce(requester_department, '')) <= 120
     and char_length(coalesce(title, '')) between 1 and 300
+    and char_length(coalesce(notes, '')) <= 2000
   );
 
 create policy tasks_update_staff on public.tasks for update

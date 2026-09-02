@@ -22,12 +22,24 @@
   });
 
   // ---- Submit ----
+  // Light client-side cooldown to discourage rapid-fire spam (server also caps
+  // field sizes; real rate-limiting is enforced by Supabase at the edge).
+  function tooSoon(key, ms) {
+    try {
+      const last = Number(localStorage.getItem(key) || 0);
+      if (Date.now() - last < ms) return true;
+      localStorage.setItem(key, String(Date.now()));
+    } catch (e) {}
+    return false;
+  }
+
   $("requestForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!sb) { msg("Configuration error — please tell the office.", true); return; }
     const name = $("rName").value.trim();
     const title = $("rTitle").value.trim();
     if (!name || !title) return;
+    if (tooSoon("tasktrack.lastsubmit", 8000)) { msg("Please wait a few seconds before submitting again.", true); return; }
 
     const token = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now()) + Math.random().toString(36).slice(2);
     const row = {
@@ -112,6 +124,7 @@
   }
 
   async function nudge(token, btn) {
+    if (tooSoon("tasktrack.lastnudge." + token, 60000)) { msg("You've already sent a reminder recently — give them a moment.", true); return; }
     if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
     const { data, error } = await sb.rpc("public_nudge", { token });
     if (error || data === false) {

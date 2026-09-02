@@ -38,11 +38,13 @@ npm i -g supabase
 supabase login
 supabase link --project-ref tlapegutuiaikhbjhhkg
 
-# set secrets (VAPID private key was generated for you — keep it secret)
+# set secrets (VAPID private key was generated for you — keep it secret).
+# WEBHOOK_SECRET is any long random string; the DB trigger must send the same value.
 supabase secrets set \
   VAPID_PUBLIC_KEY=BFJEg7wztsglrguDHyDUE_l9eO6pwvzRkNd34Mai_vkBDnzc-bX1NmMgS4PmsT6-ZUiy0cSX5HIVMNXvPsDO2MM \
   VAPID_PRIVATE_KEY=<the private key I gave you in chat> \
-  VAPID_SUBJECT=mailto:you@yourdomain.com
+  VAPID_SUBJECT=mailto:you@yourdomain.com \
+  WEBHOOK_SECRET=<a long random string you choose>
 
 # deploy
 supabase functions deploy send-push --no-verify-jwt
@@ -64,7 +66,10 @@ begin
   if new.type = 'nudge' then
     perform net.http_post(
       url := 'https://tlapegutuiaikhbjhhkg.functions.supabase.co/send-push',
-      headers := jsonb_build_object('Content-Type', 'application/json'),
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'x-webhook-secret', '<the same WEBHOOK_SECRET you set above>'
+      ),
       body := jsonb_build_object('task_id', new.task_id)
     );
   end if;

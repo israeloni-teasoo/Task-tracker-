@@ -389,7 +389,7 @@
       return `
         <div class="project-row ${active}">
           <button class="filter-btn project-btn" data-scope="project:${p.id}">
-            <span class="dot" style="background:${p.color}"></span>
+            <span class="dot" style="background:${col(p.color)}"></span>
             <span class="project-name">${esc(p.name)}</span>
             <span class="count">${n}</span>
           </button>
@@ -437,7 +437,7 @@
 
   function projectChip(t) {
     const p = projectById(t.projectId);
-    return p ? `<span class="chip project-chip" style="--pc:${p.color}">${esc(p.name)}</span>` : "";
+    return p ? `<span class="chip project-chip" style="--pc:${col(p.color)}">${esc(p.name)}</span>` : "";
   }
 
   const requestChip = (t) => t.source === "request" ? `<span class="chip request-chip">📨 ${esc(requesterLabel(t))}</span>` : "";
@@ -1107,6 +1107,9 @@
     return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
   function cssEsc(s) { return String(s).replace(/["\\]/g, "\\$&"); }
+  // Only allow hex colours into inline styles (defuses stored-XSS via a crafted
+  // project colour). Anything else falls back to a neutral grey.
+  function col(c) { return /^#[0-9a-fA-F]{3,8}$/.test(c || "") ? c : "#94a3b8"; }
 
   let toastTimer;
   function toast(msg) {

@@ -1,0 +1,9 @@
+version: 2
+updates:
+  # Keep the GitHub Actions used in workflows patched (the app itself has no
+  # npm runtime dependencies; the Supabase client is vendored and pinned).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5

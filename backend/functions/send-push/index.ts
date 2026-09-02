@@ -19,8 +19,15 @@ const vapidSubject = Deno.env.get("VAPID_SUBJECT") || "mailto:admin@example.com"
 webpush.setVapidDetails(vapidSubject, vapidPublic, vapidPrivate);
 const admin = createClient(supabaseUrl, serviceKey);
 
+const WEBHOOK_SECRET = Deno.env.get("WEBHOOK_SECRET");
+
 Deno.serve(async (req) => {
   try {
+    // Only the DB trigger (which knows the shared secret) may call this, so a
+    // stranger who learns the URL can't spam the boss with notifications.
+    if (!WEBHOOK_SECRET || req.headers.get("x-webhook-secret") !== WEBHOOK_SECRET) {
+      return json({ error: "unauthorized" }, 401);
+    }
     const { task_id, title, body } = await req.json().catch(() => ({}));
 
     // Recipients: everyone who acts on the boss's behalf.
