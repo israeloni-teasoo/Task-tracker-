@@ -11,7 +11,24 @@ command** instead of pasting SQL.
 > The older paste-style files in `../backend/migrations/` are kept for reference
 > and for the copy-into-SQL-editor workflow. Going forward, prefer the CLI.
 
-## One-time setup
+## No Docker? No problem
+
+Docker is **only** needed for the local dev stack (`supabase start`, `db reset`,
+`db diff`). Everything below syncs to the **hosted** project without it:
+
+- **Option A — SQL editor (zero setup).** Paste a migration file into the
+  Supabase dashboard → SQL editor → Run. Fine for occasional changes.
+- **Option B — one command, no Docker, no CLI.** `node scripts/apply-migrations.mjs`
+  (needs only Node + a personal access token in your environment — see the
+  bottom of this file). This is the recommended everyday option if the CLI is
+  giving you trouble.
+- **Option C — the CLI, no Docker.** `supabase link` + `supabase db push` talk
+  directly to the remote DB and do **not** need Docker. Just don't run
+  `supabase start` / `db reset` / `db diff` (those are the Docker-only ones).
+- **Option D — GitHub Action.** Apply migrations automatically from CI so you
+  run nothing locally (ask Claude to set this up).
+
+## One-time setup (CLI — Option C)
 
 ```bash
 # 1. Install the CLI (pick one)
