@@ -1,90 +1,74 @@
-# Database migrations (Supabase CLI)
+# Database migrations
 
-The database schema and its changes live here so they can be applied with **one
-command** instead of pasting SQL.
+Schema changes live here so they can be applied **without pasting SQL** — and
+**without Docker**.
 
-- `migrations/20250901120000_init.sql` — the complete current schema (tables,
-  roles, RLS, functions, triggers). Use this to stand up a **fresh** project.
-- Future changes are added as **new timestamped files** in `migrations/`. The
-  CLI applies any that haven't run yet.
+- `migrations/` — **forward migrations**, applied in filename order. Each is
+  idempotent (`create or replace`, `if not exists`, `drop policy if exists`…),
+  so re-running one is always safe.
+- `baseline_schema.sql` — the complete current schema, for standing up a
+  **brand-new** project from scratch. Not auto-applied.
+- `config.toml` — minimal CLI config.
 
-> The older paste-style files in `../backend/migrations/` are kept for reference
-> and for the copy-into-SQL-editor workflow. Going forward, prefer the CLI.
+> The paste-style copies in `../backend/migrations/` are kept for the
+> SQL-editor workflow and history.
 
-## No Docker? No problem
+## Recommended: GitHub Action (no local tools at all)
 
-Docker is **only** needed for the local dev stack (`supabase start`, `db reset`,
-`db diff`). Everything below syncs to the **hosted** project without it:
+A workflow applies pending migrations from GitHub with a button click.
 
-- **Option A — SQL editor (zero setup).** Paste a migration file into the
-  Supabase dashboard → SQL editor → Run. Fine for occasional changes.
-- **Option B — one command, no Docker, no CLI.** `node scripts/apply-migrations.mjs`
-  (needs only Node + a personal access token in your environment — see the
-  bottom of this file). This is the recommended everyday option if the CLI is
-  giving you trouble.
-- **Option C — the CLI, no Docker.** `supabase link` + `supabase db push` talk
-  directly to the remote DB and do **not** need Docker. Just don't run
-  `supabase start` / `db reset` / `db diff` (those are the Docker-only ones).
-- **Option D — GitHub Action.** Apply migrations automatically from CI so you
-  run nothing locally (ask Claude to set this up).
+**One-time:**
+1. Create a Supabase **personal access token**: Supabase dashboard → account →
+   **Access Tokens** → generate (starts `sbp_…`).
+2. In GitHub → repo **Settings → Secrets and variables → Actions → New
+   repository secret**: name `SUPABASE_ACCESS_TOKEN`, value = that token.
 
-## One-time setup (CLI — Option C)
+**Each time there's a schema change:**
+- GitHub → **Actions** tab → **Apply DB migrations** → **Run workflow**.
+
+It runs `scripts/apply-migrations.mjs`, which records applied files in a
+`public.applied_migrations` table and runs only new ones. The workflow is
+**manual only** — it never fires on a push.
+
+## Alternative: one command locally (no Docker, no CLI)
+
+Needs only Node + the token in your environment:
 
 ```bash
-# 1. Install the CLI (pick one)
-npm install -g supabase          # or: brew install supabase/tap/supabase
+# PowerShell
+$env:SUPABASE_ACCESS_TOKEN="sbp_xxx"
+$env:SUPABASE_PROJECT_REF="tlapegutuiaikhbjhhkg"
+node scripts/apply-migrations.mjs
+```
 
-# 2. Log in and link this repo to the project
+```bash
+# macOS/Linux
+export SUPABASE_ACCESS_TOKEN=sbp_xxx
+export SUPABASE_PROJECT_REF=tlapegutuiaikhbjhhkg
+node scripts/apply-migrations.mjs
+```
+
+## Alternative: the Supabase CLI (no Docker needed for this)
+
+`supabase db push` talks directly to the hosted DB — Docker is only for the
+local stack (`supabase start` / `db reset` / `db diff`), which you don't need.
+
+```bash
+npm install -g supabase
 supabase login
 supabase link --project-ref tlapegutuiaikhbjhhkg
+supabase db push
 ```
 
-## Adopting the CLI on the EXISTING (live) project
+## Simplest of all: SQL editor
 
-The live database already has the schema, so **baseline** it first — this
-records the current state as "already applied" so `db push` won't try to re-run
-it:
+Paste a migration file into the Supabase dashboard → SQL editor → Run. Zero
+setup; good for a one-off.
 
-```bash
-supabase db pull        # introspects the remote DB and writes/marks a baseline
-```
+## Everyday flow
 
-Then apply anything newer (e.g. the touch_task fix) — if you haven't already
-pasted it:
+1. Claude adds a new idempotent file to `supabase/migrations/`.
+2. You apply it via **any** route above (Action button, `node`, `db push`, or paste).
 
-```bash
-supabase db push        # runs only migrations not yet applied
-```
-
-## Standing up a BRAND-NEW project
-
-```bash
-supabase link --project-ref <new-ref>
-supabase db push        # runs migrations/ in order (starts with the init baseline)
-```
-
-## Everyday flow (after setup)
-
-1. Claude adds a new file to `supabase/migrations/` (e.g.
-   `20250115090000_add_labels.sql`).
-2. You run:
-
-   ```bash
-   supabase db push
-   ```
-
-That's it — no copy-pasting into the SQL editor.
-
-## Alternative: one-command apply without the CLI
-
-`../scripts/apply-migrations.mjs` applies pending files via the Supabase
-Management API using a token read from your environment (never committed):
-
-```bash
-export SUPABASE_ACCESS_TOKEN=sbp_xxx        # a personal access token, kept local
-export SUPABASE_PROJECT_REF=tlapegutuiaikhbjhhkg
-node scripts/apply-migrations.mjs           # runs any *.sql it hasn't recorded yet
-```
-
-Keep that token on your machine only — it grants project admin. Prefer the CLI
-above for day-to-day work.
+Keep the access token on your machine / in the GitHub secret only — it grants
+project admin, so never commit it or paste it into chat.
