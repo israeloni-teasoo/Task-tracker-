@@ -114,8 +114,15 @@
         if (rec) {
           badge.textContent = STATUS_LABEL[rec.status] || rec.status;
           badge.className = "status-badge s-" + rec.status;
-          if (nudgeBtn) nudgeBtn.disabled = rec.status === "completed";   // can't remind on a done request
-          if (rec.needs_attention && nudgeBtn) nudgeBtn.textContent = "Reminder sent";
+          if (nudgeBtn) {
+            if (rec.status === "completed") {
+              nudgeBtn.remove();                       // completed: no reminder button at all
+            } else if (rec.needs_attention) {
+              nudgeBtn.disabled = true; nudgeBtn.textContent = "Reminder sent";
+            } else {
+              nudgeBtn.disabled = false;
+            }
+          }
         } else {
           badge.textContent = "Not found";
         }
@@ -123,21 +130,38 @@
     }
   }
 
+  // One reminder per request every 30 minutes (matches the server-side limit).
+  const REMINDER_COOLDOWN_MS = 30 * 60 * 1000;
   async function nudge(token, btn) {
-    if (tooSoon("tasktrack.lastnudge." + token, 60000)) { msg("You've already sent a reminder recently — give them a moment.", true); return; }
+    if (tooSoon("tasktrack.lastnudge." + token, REMINDER_COOLDOWN_MS)) {
+      msg("You've already sent a reminder for this request. You can send another after about 30 minutes.", true);
+      return;
+    }
     if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
     const { data, error } = await sb.rpc("public_nudge", { token });
-    if (error || data === false) {
+    // Success = boolean true (legacy fn) or the string 'ok' (rate-limited fn).
+    const ok = data === true || data === "ok";
+    if (error || !ok) {
       if (btn) { btn.disabled = false; btn.textContent = "Send Reminder"; }
-      let m = error ? (error.message || "Couldn't send the reminder.") : "That request can't be reminded (already completed).";
-      // Friendlier hint for the common "function not installed yet" case.
+      let m;
       if (error && /public_nudge|function|schema cache/i.test(error.message || "")) {
-        m = "Reminders aren't switched on yet — the office admin needs to run migration 007.";
+        m = "Reminders aren't switched on yet — the office admin needs to run the reminder migration.";
+      } else if (error) {
+        m = error.message || "Couldn't send the reminder.";
+      } else if (data === "cooldown") {
+        m = "A reminder was sent for this request recently — please try again in about 30 minutes.";
+      } else if (data === "completed" || data === false) {
+        m = "That request is already completed — no reminder needed.";
+        if (btn) btn.remove();
+      } else if (data === "notfound") {
+        m = "We couldn't find that request.";
+      } else {
+        m = "Couldn't send the reminder.";
       }
       msg(m, true);
       return;
     }
-    if (btn) btn.textContent = "Reminder sent";
+    if (btn) { btn.disabled = true; btn.textContent = "Reminder sent"; }
     msg("👍 Reminder sent — they'll see it flagged.", false);
   }
 

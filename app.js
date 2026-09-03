@@ -1111,6 +1111,9 @@
     const sorted = [...people].sort((a, b) => (order[a.role] - order[b.role]) || (a.email || "").localeCompare(b.email || ""));
     list.innerHTML = sorted.map((p) => {
       const isMe = p.userId === me.id;
+      const isOwner = myRole === "owner";
+      // The Owner may remove anyone but themselves; other roles can't remove.
+      const canRemove = isOwner && !isMe;
       const opts = ROLES.map((r) => `<option value="${r}" ${p.role === r ? "selected" : ""}>${ROLE_LABEL[r]}</option>`).join("");
       const label = p.name || p.email || "Unknown";
       return `
@@ -1120,11 +1123,28 @@
             <span class="person-name">${esc(label)}${isMe ? ' <span class="you-tag">you</span>' : ""}</span>
             <span class="person-email">${esc(p.email || "")}</span>
           </div>
-          <select class="person-role" data-user="${p.userId}" ${isMe ? "disabled" : ""}>${opts}</select>
+          <select class="person-role" data-user="${p.userId}" ${isMe || !isOwner ? "disabled" : ""}>${opts}</select>
+          ${canRemove ? `<button class="icon-btn danger" data-remove="${p.userId}" title="Remove access">✕</button>` : ""}
         </div>`;
     }).join("");
     list.querySelectorAll(".person-role").forEach((sel) =>
       sel.addEventListener("change", () => changeRole(sel.dataset.user, sel.value)));
+    list.querySelectorAll("[data-remove]").forEach((b) =>
+      b.addEventListener("click", () => removePerson(b.dataset.remove)));
+  }
+
+  async function removePerson(userId) {
+    const p = people.find((x) => x.userId === userId);
+    const who = p ? (p.name || p.email || "this user") : "this user";
+    if (!confirm(`Remove ${who}'s access to the app? They'll be limited to the public office request page. You can re-invite them anytime.`)) return;
+    const { error } = await sb.from("memberships").delete().eq("user_id", userId);
+    if (error) { toast(error.message || "Could not remove access"); return; }
+    // Also drop any pre-assigned role so a fresh invite is required to return.
+    if (p && p.email) { try { await sb.from("role_invites").delete().eq("email", p.email); } catch (e) {} }
+    people = people.filter((x) => x.userId !== userId);
+    delete profilesById[userId];
+    renderPeople();
+    toast(`${who} removed from the app`);
   }
 
   async function changeRole(userId, role) {
@@ -1169,6 +1189,17 @@
       const done = t.status === "completed";
       const dueChip = t.due ? `<span class="chip due">📅 ${formatDue(t.due)}</span>` : "";
       const nudged = t.needsAttention ? `<span class="chip attention-chip">Reminder sent</span>` : "";
+      // Completed requests get no reminder button at all. Otherwise the button
+      // is disabled while a reminder is still pending or within the cooldown.
+      const wait = reminderWaitMs(t);
+      let btn = "";
+      if (!done) {
+        const blocked = t.needsAttention || wait > 0;
+        const label = t.needsAttention ? "Reminder sent"
+          : wait > 0 ? `Try again in ${Math.ceil(wait / 60000)}m`
+          : "Send Reminder";
+        btn = `<button class="ghost-btn nudge-btn" data-nudge="${t.id}" ${blocked ? "disabled" : ""}>${label}</button>`;
+      }
       return `
         <div class="request-row ${done ? "done" : ""}">
           <div class="request-main">
@@ -1179,16 +1210,29 @@
               ${dueChip}${nudged}
             </div>
           </div>
-          <button class="ghost-btn nudge-btn" data-nudge="${t.id}" ${done ? "disabled" : ""}>Send Reminder</button>
+          ${btn}
         </div>`;
     }).join("");
     list.querySelectorAll("[data-nudge]").forEach((b) => b.addEventListener("click", () => nudge(b.dataset.nudge)));
   }
 
+  // A requester can send at most one reminder per task per hour (and none while
+  // one is still pending). Returns ms left in the cooldown, or 0 if clear.
+  const REMINDER_COOLDOWN_MS = 30 * 60 * 1000;   // 30 minutes (matches /office)
+  function reminderWaitMs(t) {
+    try {
+      const last = Number(localStorage.getItem("tasktrack.nudge." + t.id) || 0);
+      const left = REMINDER_COOLDOWN_MS - (Date.now() - last);
+      return left > 0 ? left : 0;
+    } catch (e) { return 0; }
+  }
+
   async function nudge(taskId) {
+    const t = tasks.find((x) => x.id === taskId);
+    if (t && (t.status === "completed" || t.needsAttention || reminderWaitMs(t) > 0)) return;
     const { error } = await sb.from("task_events").insert({ task_id: taskId, user_id: me.id, type: "nudge", message: "Reminder" });
     if (error) { toast(error.message || "Could not send reminder"); return; }
-    const t = tasks.find((x) => x.id === taskId);
+    try { localStorage.setItem("tasktrack.nudge." + taskId, String(Date.now())); } catch (e) {}
     if (t) t.needsAttention = true;
     renderRequests();
     toast("Reminder sent — they'll see it flagged");

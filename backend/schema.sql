@@ -324,18 +324,31 @@ grant execute on function public.public_request_status(uuid) to anon, authentica
 
 -- Public nudge (by token) — lets an accountless submitter raise the flag on
 -- their own request. Definer-run; the flag_on_nudge trigger does the flagging.
+-- Returns a status string: 'ok' | 'completed' | 'notfound' | 'cooldown'.
+-- Rate-limited to one reminder per request every 30 minutes (server-enforced).
 create or replace function public.public_nudge(token uuid)
-returns boolean language plpgsql security definer set search_path = public as $$
+returns text language plpgsql security definer set search_path = public as $$
 declare
   tid uuid;
+  st  text;
+  last_at timestamptz;
 begin
-  select id into tid from public.tasks
-   where track_token = token and source = 'request' and status <> 'completed'
+  select id, status::text into tid, st from public.tasks
+   where track_token = token and source = 'request'
    limit 1;
-  if tid is null then return false; end if;
+  if tid is null then return 'notfound'; end if;
+  if st = 'completed' then return 'completed'; end if;
+
+  select max(created_at) into last_at
+    from public.task_events
+   where task_id = tid and type = 'nudge';
+  if last_at is not null and last_at > now() - interval '30 minutes' then
+    return 'cooldown';
+  end if;
+
   insert into public.task_events (task_id, user_id, type, message)
-  values (tid, null, 'nudge', 'Nudge from requester (public link)');
-  return true;
+  values (tid, null, 'nudge', 'Reminder from requester (public link)');
+  return 'ok';
 end;
 $$;
 grant execute on function public.public_nudge(uuid) to anon, authenticated;
