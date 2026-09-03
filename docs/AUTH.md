@@ -84,34 +84,31 @@ you'll need. For very high volume or sending as many different addresses, use
 the **SMTP relay service** instead (Admin console → Gmail → Routing → SMTP relay;
 host `smtp-relay.gmail.com`, port 587).
 
-## Invitation-only main app
+## Accounts, invites & roles
 
-The main app is **invitation-only**; only the public `/office` request page is
-open to everyone (and it needs no account at all). Two things make this true:
+Everyone who is assigned tasks or receives requests needs an account. The Owner
+adds people; the public `/office` request page still needs no account at all.
 
-1. **Turn off open sign-up.** Supabase → **Authentication → Sign In / Providers →
-   Email** → disable **"Allow new users to sign up"** (a.k.a. "Enable signups").
-   With this off, a stranger with the app URL cannot create an account.
-2. **Deploy the `invite-user` Edge Function** so the Owner can invite people
-   (it uses the service role, which can create accounts even with sign-up off):
-   - **No-Docker / no-CLI option:** Supabase dashboard → **Edge Functions → Create
-     a function** → name it `invite-user`, paste the code from
-     `backend/functions/invite-user/index.ts`, and Deploy.
-   - **CLI option (no Docker needed):** `supabase functions deploy invite-user`.
-   - Optionally set the secret **APP_URL** to `https://mp-office.teasooconsulting.com`
-     (Edge Functions → Secrets) so the invite link points at the app; it defaults
-     to that anyway. `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are provided
-     automatically.
-   - Make sure the app URL is in Auth → **URL Configuration → Redirect URLs**
-     (already required for login).
+### One-time setup: allow sign-ups
+Supabase → **Authentication → Sign In / Providers → Email** → **enable "Allow new
+users to sign up."** This lets the Owner's invite create the person's account via
+a magic link. New accounts default to the **Requester** role (office-only) unless
+the Owner picked another role, so turning sign-ups on does not hand anyone staff
+access. Also make sure the app URL is in Auth → **URL Configuration → Redirect
+URLs** (already required for login).
+
+> No Edge Function is required anymore. (`backend/functions/invite-user` is left
+> in the repo as an optional service-role alternative, but the app no longer
+> calls it.)
 
 ### How inviting works
-- The Owner opens **People & roles → Add by email → role → Add**.
-- That calls `invite-user`, which records the role and **emails the person an
-  invitation** with a sign-in link.
-- When they accept, the sign-up trigger applies the role you chose.
-- If the email already has an account, their role is just updated and they sign
-  in normally.
+- The Owner opens **People & roles → Add by email → pick a role → Add**.
+- The app records the chosen role and **emails the person a magic link**
+  (`signInWithOtp`, which creates their account on first click).
+- On that first click they're required to **set their name and a password**;
+  after that they sign in with email + password like everyone else.
+- The sign-up trigger applies the role the Owner chose (default **Requester**).
+- If the email already has an account, their role is simply updated instead.
 
 Reliable invite emails depend on SMTP being configured (above) — otherwise
 you'll hit the built-in email rate limit.

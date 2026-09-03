@@ -163,27 +163,38 @@
 
   function showPwSetup(isRecovery) {
     hide(bootEl); hide(authScreen); hide(appEl); hide($("portalScreen"));
-    $("pwSetupTitle").textContent = isRecovery ? "Choose a new password" : "Create your password";
+    $("pwSetupTitle").textContent = isRecovery ? "Choose a new password" : "Welcome — set up your account";
     $("pwSetupSub").textContent = isRecovery
       ? "Enter a new password for your account."
-      : "Set a password so you can sign back in anytime — on any device.";
-    $("pwSetupSubmit").textContent = isRecovery ? "Save new password" : "Save password & continue";
+      : "Add your name and a password so you can sign back in anytime, on any device.";
+    $("pwSetupSubmit").textContent = isRecovery ? "Save new password" : "Save & continue";
     $("pwSetupMsg").hidden = true;
     $("pwNew").value = ""; $("pwNew2").value = "";
+    // Name is only collected on first entry, not on a password reset.
+    const nameField = $("pwNameField");
+    if (nameField) nameField.hidden = !!isRecovery;
+    const nameInput = $("pwName");
+    if (nameInput) { nameInput.value = (me && me.user_metadata && me.user_metadata.full_name) || ""; nameInput.required = !isRecovery; }
     show($("pwSetupScreen"));
-    setTimeout(() => $("pwNew").focus(), 50);
+    setTimeout(() => (isRecovery ? $("pwNew") : $("pwName") || $("pwNew")).focus(), 50);
   }
 
   $("pwSetupForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const pw = $("pwNew").value, pw2 = $("pwNew2").value;
+    const name = ($("pwName").value || "").trim();
+    if (!recoveryMode && !name) { pwSetupMsg("Please enter your name.", false); return; }
     if (pw.length < 6) { pwSetupMsg("Password must be at least 6 characters.", false); return; }
     if (pw !== pw2) { pwSetupMsg("The two passwords don't match.", false); return; }
     const btn = $("pwSetupSubmit"); const label = btn.textContent;
     btn.disabled = true; btn.textContent = "Saving…";
-    const { error } = await sb.auth.updateUser({ password: pw, data: { password_set: true } });
+    const meta = { password_set: true };
+    if (!recoveryMode && name) meta.full_name = name;
+    const { error } = await sb.auth.updateUser({ password: pw, data: meta });
     btn.disabled = false; btn.textContent = label;
     if (error) { pwSetupMsg(friendlyAuthError(error), false); return; }
+    // Persist the name onto their profile row too (used across the app).
+    if (!recoveryMode && name && me) { try { await sb.from("profiles").update({ full_name: name }).eq("id", me.id); } catch (_) {} }
     // Refresh the local user so hasPassword() is true from here on.
     try { me = (await sb.auth.getUser()).data.user || me; } catch (_) {}
     if (recoveryMode) {
@@ -1241,18 +1252,34 @@
     if (existing) {
       await changeRole(existing.userId, role);
       $("inviteEmail").value = "";
+      toast(`Role updated to ${ROLE_LABEL[role]}`);
       return;
     }
-    // Send an actual invitation email (creates the account + emails a sign-in
-    // link) via the invite-user function; the app is invitation-only so this is
-    // the only way into the main app.
-    const { data, error } = await sb.functions.invoke("invite-user", { body: { email, role } });
-    if (error) { toast("Could not send the invite — check the email address and that you're the Owner."); return; }
-    $("inviteEmail").value = "";
+    const btn = e.target.querySelector('button[type="submit"]');
+    if (btn) btn.disabled = true;
+    // 1) Record the chosen role so the sign-up trigger applies it on first sign-in.
+    const { error: invErr } = await sb.from("role_invites").upsert(
+      { email, role, invited_by: me.id }, { onConflict: "email" });
+    if (invErr) { if (btn) btn.disabled = false; toast(invErr.message || "Couldn't save the invite — are you the Owner?"); return; }
+    // 2) Email a magic link that creates their account (needs sign-ups ON in Supabase).
+    const { error } = await sb.auth.signInWithOtp({
+      email, options: { shouldCreateUser: true, emailRedirectTo: location.origin + "/" },
+    });
+    if (btn) btn.disabled = false;
+    // Either way the role is saved; keep it on the pending list so it's visible.
     invites = invites.filter((i) => i.email !== email).concat([{ email, role, created_at: new Date().toISOString() }]);
     renderInvites();
-    if (data && data.alreadyExists) toast(`${email} already has an account — role set to ${ROLE_LABEL[role]}. They can just sign in.`);
-    else toast(`Invitation emailed to ${email} (${ROLE_LABEL[role]})`);
+    if (error) {
+      const low = (error.message || "").toLowerCase();
+      if (low.includes("signups not allowed") || low.includes("not allowed") || low.includes("disabled"))
+        toast("Enable “Allow new users to sign up” in Supabase → Auth → Providers → Email, then invite again. The role is saved.");
+      else if (low.includes("rate limit"))
+        toast("Email rate limit hit — set up SMTP (see docs/AUTH.md), then re-invite. The role is saved.");
+      else toast(error.message || "Couldn't send the invite email. The role is saved.");
+      return;
+    }
+    $("inviteEmail").value = "";
+    toast(`Invitation emailed to ${email} (${ROLE_LABEL[role]})`);
     loadInvites();
   });
 
