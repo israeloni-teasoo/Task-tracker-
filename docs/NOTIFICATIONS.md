@@ -55,32 +55,33 @@ The function lives in `backend/functions/send-push/`. `SUPABASE_URL` and
 
 ### b. Call it when a nudge happens
 
-Run this in the SQL editor so each nudge pings the boss's devices:
+The DB trigger that fires the push is now shipped as a **migration** — you don't
+paste SQL by hand. Two steps:
 
-```sql
-create extension if not exists pg_net;
+1. **Run the migration.** Trigger the **"Apply DB migrations"** GitHub Action
+   (or apply `supabase/migrations/20250903140000_wire_push_reminders.sql`). This
+   folds a best-effort push into the existing nudge trigger and creates a locked
+   `public.app_settings` table to hold the webhook config (kept out of the
+   browser by RLS). It's safe to run before the function is deployed — pushes are
+   simply skipped until the config rows below exist.
 
-create or replace function public.notify_on_nudge()
-returns trigger language plpgsql security definer set search_path = public as $$
-begin
-  if new.type = 'nudge' then
-    perform net.http_post(
-      url := 'https://tlapegutuiaikhbjhhkg.functions.supabase.co/send-push',
-      headers := jsonb_build_object(
-        'Content-Type', 'application/json',
-        'x-webhook-secret', '<the same WEBHOOK_SECRET you set above>'
-      ),
-      body := jsonb_build_object('task_id', new.task_id)
-    );
-  end if;
-  return new;
-end;
-$$;
+2. **Point it at your function.** In the SQL editor, run (using the same
+   `WEBHOOK_SECRET` you set on the function):
 
-drop trigger if exists task_events_notify on public.task_events;
-create trigger task_events_notify after insert on public.task_events
-  for each row execute function public.notify_on_nudge();
-```
+   ```sql
+   insert into public.app_settings(key, value) values
+     ('push_fn_url', 'https://tlapegutuiaikhbjhhkg.supabase.co/functions/v1/send-push'),
+     ('push_webhook_secret', '<the same WEBHOOK_SECRET you set above>')
+   on conflict (key) do update set value = excluded.value;
+   ```
+
+That's it — the next reminder will hit the boss's subscribed devices. Because the
+push call is wrapped in an exception guard, a wrong URL, a down function, or a
+missing key can never stop a reminder from being recorded; it just won't buzz.
+
+> If you previously hand-installed a `notify_on_nudge` / `task_events_notify`
+> trigger from an older version of this doc, the migration drops it for you so
+> reminders don't fire twice.
 
 ### Notes
 

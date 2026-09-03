@@ -110,6 +110,14 @@ create table public.reminders (
   created_at timestamptz not null default now()
 );
 
+-- Server-only config (e.g. the send-push webhook URL + secret). Locked by RLS
+-- with no policies, so only security-definer functions / the service role read it.
+create extension if not exists pg_net;
+create table public.app_settings (
+  key   text primary key,
+  value text
+);
+
 -- ---------- Role helper functions ----------
 -- security definer so they read `memberships` without tripping RLS recursion.
 
@@ -202,9 +210,28 @@ create trigger tasks_touch before update on public.tasks
 -- the flag regardless of the nudger's row-level permissions.
 create or replace function public.flag_on_nudge()
 returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  fn_url text;
+  secret text;
 begin
   if new.type = 'nudge' then
     update public.tasks set needs_attention = true where id = new.task_id;
+
+    -- Best-effort Web Push to the boss's devices (config in app_settings).
+    -- Wrapped so a delivery problem never rolls back the nudge.
+    begin
+      select value into fn_url from public.app_settings where key = 'push_fn_url';
+      select value into secret from public.app_settings where key = 'push_webhook_secret';
+      if fn_url is not null and secret is not null then
+        perform net.http_post(
+          url := fn_url,
+          body := jsonb_build_object('task_id', new.task_id),
+          headers := jsonb_build_object('Content-Type', 'application/json', 'x-webhook-secret', secret)
+        );
+      end if;
+    exception when others then
+      null;
+    end;
   end if;
   return new;
 end;
@@ -225,6 +252,7 @@ alter table public.tasks               enable row level security;
 alter table public.task_events         enable row level security;
 alter table public.push_subscriptions  enable row level security;
 alter table public.reminders           enable row level security;
+alter table public.app_settings        enable row level security;   -- no policies: server-only
 
 -- profiles: see your own; staff see everyone; you can edit your own.
 create policy profiles_select on public.profiles for select

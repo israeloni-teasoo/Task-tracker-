@@ -64,8 +64,57 @@
     remember(token, title);
     e.target.reset();
     msg("✓ Sent! It's now on their list. You can track it below.", false);
+    showTrackLink(token);
     renderTracked();
   });
+
+  // A shareable, secret link that lets the submitter track this request (and
+  // send reminders) from any device — no account needed. The token is a random
+  // UUID, so links can't be guessed.
+  function trackUrlFor(token) {
+    return location.origin + location.pathname + "#track=" + token;
+  }
+  function showTrackLink(token) {
+    const box = $("trackLinkBox"), input = $("trackLinkInput");
+    if (!box || !input) return;
+    input.value = trackUrlFor(token);
+    box.hidden = false;
+  }
+  const copyBtn = $("trackLinkCopy");
+  if (copyBtn) {
+    copyBtn.addEventListener("click", async () => {
+      const input = $("trackLinkInput");
+      try {
+        await navigator.clipboard.writeText(input.value);
+      } catch (e) {
+        input.focus(); input.select();
+        try { document.execCommand("copy"); } catch (_) {}
+      }
+      copyBtn.textContent = "Copied!";
+      setTimeout(() => (copyBtn.textContent = "Copy"), 1500);
+    });
+  }
+
+  // If arriving via a shared tracking link (#track=<token>), adopt it onto this
+  // device so the request shows up under "My requests".
+  async function importTrackTokenFromUrl() {
+    const m = (location.hash || "").match(/track=([0-9a-f-]{10,})/i);
+    if (!m) return;
+    const token = m[1];
+    // Clean the token out of the address bar.
+    try { history.replaceState(null, "", location.pathname); } catch (e) {}
+    if (myList().some((r) => r.token === token)) return;   // already tracked
+    let title = "Your request";
+    try {
+      if (sb) {
+        const { data } = await sb.rpc("public_request_status", { token });
+        const rec = Array.isArray(data) ? data[0] : data;
+        if (rec && rec.title) title = rec.title;
+        else if (!rec) { toast("That tracking link wasn't found."); return; }
+      }
+    } catch (e) { /* still add it; status lookup will retry on render */ }
+    remember(token, title);
+  }
 
   function msg(text, isErr) {
     const el = $("rMsg");
@@ -173,5 +222,5 @@
   let toastTimer;
   function toast(t) { toastEl.textContent = t; toastEl.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => (toastEl.hidden = true), 2400); }
 
-  renderTracked();
+  (async () => { await importTrackTokenFromUrl(); renderTracked(); })();
 })();

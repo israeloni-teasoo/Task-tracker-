@@ -62,10 +62,18 @@
           <button type="submit" class="primary-btn wide" id="rSubmit">Submit request</button>
         </form>
         <p class="auth-msg" id="rMsg" hidden></p>
+        <div class="track-link" id="trackLinkBox" hidden>
+          <p class="track-link-label">🔖 Save this link to check your request (and send reminders) from any device:</p>
+          <div class="track-link-row">
+            <input type="text" id="trackLinkInput" readonly />
+            <button type="button" class="ghost-btn" id="trackLinkCopy">Copy</button>
+          </div>
+        </div>
       </section>
 
       <section class="portal-list" id="trackSection" hidden>
-        <h2>My requests (this device)</h2>
+        <h2>My requests</h2>
+        <p class="track-hint">Requests you submit on this device show here. Open a saved tracking link to add one from another device.</p>
         <div id="trackList"></div>
       </section>
     </div>
