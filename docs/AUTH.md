@@ -86,14 +86,14 @@ host `smtp-relay.gmail.com`, port 587).
 
 ## Accounts, invites & roles
 
-Everyone who is assigned tasks or receives requests needs an account. The Owner
-adds people; the public `/office` request page still needs no account at all.
+Everyone who is assigned tasks or receives requests needs an account. The Admin
+adds people. (There is no public `/office` page anymore — everyone signs in.)
 
 ### One-time setup: allow sign-ups
 Supabase → **Authentication → Sign In / Providers → Email** → **enable "Allow new
-users to sign up."** This lets the Owner's invite create the person's account via
+users to sign up."** This lets the Admin's invite create the person's account via
 a magic link. New accounts default to the **Requester** role (office-only) unless
-the Owner picked another role, so turning sign-ups on does not hand anyone staff
+the Admin picked another role, so turning sign-ups on does not hand anyone staff
 access. Also make sure the app URL is in Auth → **URL Configuration → Redirect
 URLs** (already required for login).
 
@@ -102,12 +102,12 @@ URLs** (already required for login).
 > calls it.)
 
 ### How inviting works
-- The Owner opens **People & roles → Add by email → pick a role → Add**.
+- The Admin opens **People & roles → Add by email → pick a role → Add**.
 - The app records the chosen role and **emails the person a magic link**
   (`signInWithOtp`, which creates their account on first click).
 - On that first click they're required to **set their name and a password**;
   after that they sign in with email + password like everyone else.
-- The sign-up trigger applies the role the Owner chose (default **Requester**).
+- The sign-up trigger applies the role the Admin chose (default **Requester**).
 - If the email already has an account, their role is simply updated instead.
 
 Reliable invite emails depend on SMTP being configured (above) — otherwise

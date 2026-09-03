@@ -29,7 +29,7 @@
   ];
   const statusLabel = (k) => (STATUSES.find((s) => s.key === k) || {}).label || k;
   const PALETTE = ["#3b82f6", "#a855f7", "#22c55e", "#f59e0b", "#ef4444", "#14b8a6", "#ec4899", "#6366f1"];
-  const ROLE_LABEL = { owner: "Owner", delegate: "Delegate", editor: "Editor", viewer: "Viewer", requester: "Requester" };
+  const ROLE_LABEL = { owner: "Admin", delegate: "Delegate", editor: "Editor", viewer: "Viewer", requester: "Requester" };
 
   // ---- State ----
   let projects = [], tasks = [], people = [];
@@ -132,16 +132,21 @@
     appReady = true;
     hide($("pwSetupScreen"));
 
-    if (myRole === "requester") {
-      // Office staff: the simplified request portal.
+    if (!["owner", "delegate"].includes(myRole)) {
+      // Everyone else (editor / viewer / requester) gets a personal dashboard.
       show($("portalScreen"));
       $("portalEmail").textContent = me.email || "";
       loadPortalRecipients();
-      loadTasks().then(() => { subscribeRealtime(); renderRequests(); });   // RLS: only their own
+      Promise.all([loadTasks(), loadAssignees(), loadRecipients()]).then(() => {
+        primeFlagged();
+        subscribeRealtime();
+        renderDashboard();
+        setupNotifications();
+      });
       return;
     }
 
-    // Boss / delegate / editor / viewer: the full app.
+    // Admin (owner) + Managing Partner (delegate): the full app.
     show(appEl);
     renderAccount();
     Promise.all([loadProjects(), loadTasks(), loadPeople(), loadAssignees(), loadRecipients()]).then(() => {
@@ -176,7 +181,16 @@
     const nameField = $("pwNameField");
     if (nameField) nameField.hidden = !!isRecovery;
     const nameInput = $("pwName");
-    if (nameInput) { nameInput.value = (me && me.user_metadata && me.user_metadata.full_name) || ""; nameInput.required = !isRecovery; }
+    if (nameInput) {
+      nameInput.value = (me && me.user_metadata && me.user_metadata.full_name) || "";
+      nameInput.required = !isRecovery;
+      // If a name was set on the invite (e.g. "Managing Partner"), pre-fill it.
+      if (!isRecovery && !nameInput.value && me) {
+        sb.from("profiles").select("full_name").eq("id", me.id).maybeSingle()
+          .then(({ data }) => { if (data && data.full_name && !nameInput.value) nameInput.value = data.full_name; })
+          .catch(() => {});
+      }
+    }
     show($("pwSetupScreen"));
     setTimeout(() => (isRecovery ? $("pwNew") : $("pwName") || $("pwNew")).focus(), 50);
   }
@@ -228,7 +242,7 @@
       $("authSubmit").textContent = pw ? "Sign in" : "Send me a login link";
       $("authHint").textContent = pw
         ? "Access is by invitation. Sign in with the email you were invited on."
-        : "We'll email a one-time link to your invited address. New here? Ask the Owner for an invite.";
+        : "We'll email a one-time link to your invited address. New here? Ask the Admin for an invite.";
       $("authMsg").hidden = true;
     });
   });
@@ -247,13 +261,13 @@
     if (low.includes("invalid login") || low.includes("invalid credentials"))
       return "That email or password isn't right. If you've never set a password, use “Forgot password?” to create one.";
     if (low.includes("not allowed") || low.includes("signups not allowed") || low.includes("signup is disabled"))
-      return "Access to the app is by invitation only. Ask the Owner to invite your email — meanwhile the office request page is open to everyone.";
+      return "Access to the app is by invitation only. Ask the Admin to invite you.";
     if (low.includes("email not confirmed"))
       return "Please open the invitation link we emailed you first, then set your password.";
     if (low.includes("rate limit"))
       return "Too many emails for now — please wait about an hour, or sign in with your password.";
     if (low.includes("user not found"))
-      return "We couldn't find an account for that email. Ask the Owner to invite you.";
+      return "We couldn't find an account for that email. Ask the Admin to invite you.";
     return msg || "Something went wrong. Please try again.";
   }
 
@@ -483,8 +497,8 @@
           // Refresh the activity thread live if its task's modal is open.
           if (openTaskId && p.new && p.new.task_id === openTaskId && overlay && !overlay.hidden) loadThread(openTaskId);
         })
-        .on("postgres_changes", { event: "*", schema: "public", table: "task_assignees" }, () => { loadAssignees().then(render); })
-        .on("postgres_changes", { event: "*", schema: "public", table: "task_recipients" }, () => { loadRecipients().then(render); })
+        .on("postgres_changes", { event: "*", schema: "public", table: "task_assignees" }, () => { loadAssignees().then(rerender); })
+        .on("postgres_changes", { event: "*", schema: "public", table: "task_recipients" }, () => { loadRecipients().then(rerender); })
         .subscribe();
     } catch (e) { /* realtime is best-effort */ }
   }
@@ -501,7 +515,7 @@
       const i = arr.findIndex((x) => x.id === obj.id);
       if (i >= 0) arr[i] = obj; else arr.unshift(obj);
     }
-    if (myRole === "requester") { renderRequests(); return; }
+    if (!["owner", "delegate"].includes(myRole)) { renderDashboard(); return; }
     saveCache();
     render();
     if (kind === "task") { detectNewRequests(); detectReminders(); }
@@ -803,7 +817,7 @@
     const row = { ...rowFromTask(data), source: "internal", created_by: me.id };
     const { data: inserted, error } = await sb.from("tasks").insert(row).select().single();
     if (error) { failWrite(error); return null; }
-    upsertLocal(tasks, taskFromRow(inserted)); saveCache(); render();
+    upsertLocal(tasks, taskFromRow(inserted)); saveCache(); rerender();
     return inserted.id;
   }
 
@@ -813,9 +827,22 @@
     const toAdd = ids.filter((x) => !cur.includes(x));
     const toDel = cur.filter((x) => !ids.includes(x));
     try {
-      if (toAdd.length) await sb.from("task_assignees").insert(toAdd.map((u) => ({ task_id: taskId, user_id: u })));
-      if (toDel.length) await sb.from("task_assignees").delete().eq("task_id", taskId).in("user_id", toDel);
-    } catch (e) { console.warn("assignee save failed", e); }
+      if (toAdd.length) {
+        const { error } = await sb.from("task_assignees").insert(toAdd.map((u) => ({ task_id: taskId, user_id: u })));
+        if (error) throw error;
+      }
+      if (toDel.length) {
+        const { error } = await sb.from("task_assignees").delete().eq("task_id", taskId).in("user_id", toDel);
+        if (error) throw error;
+      }
+    } catch (e) {
+      console.warn("assignee save failed", e);
+      const m = (e && e.message) || "";
+      toast(/relation|does not exist|schema cache/i.test(m)
+        ? "Assignment needs the latest DB migration — run “Apply DB migrations”."
+        : (m || "Couldn't save the assignees"));
+      return;
+    }
     assigneesByTask[taskId] = ids.slice();
   }
   async function updateTask(id, patch) {
@@ -825,13 +852,13 @@
     const row = { ...rowFromTask(merged), needs_attention: false };
     const { data: updated, error } = await sb.from("tasks").update(row).eq("id", id).select().single();
     if (error) return failWrite(error);
-    upsertLocal(tasks, taskFromRow(updated)); saveCache(); render();
+    upsertLocal(tasks, taskFromRow(updated)); saveCache(); rerender();
   }
   async function deleteTask(id) {
     const { error } = await sb.from("tasks").delete().eq("id", id);
     if (error) return failWrite(error);
     const i = tasks.findIndex((t) => t.id === id); if (i >= 0) tasks.splice(i, 1);
-    saveCache(); render();
+    saveCache(); rerender();
   }
 
   async function createProject(name, color) {
@@ -874,14 +901,22 @@
       `<option value="${p.id}" ${p.id === selectedId ? "selected" : ""}>${esc(p.name)}</option>`).join("");
   }
 
-  // Only people who can act on tasks can be assignees. Multi-select checkboxes.
+  // Anyone with an account (except pure requesters is optional) can be assigned.
+  // Include all staff so the list is never mysteriously empty.
   function fillAssigneeOptions(selectedIds) {
     const chosen = new Set(selectedIds || []);
-    const assignable = people.filter((p) => ["owner", "delegate", "editor"].includes(p.role));
-    if (!assignable.length) { $("fAssignees").innerHTML = `<span class="check-empty">No staff to assign yet.</span>`; return; }
+    const order = { owner: 0, delegate: 1, editor: 2, viewer: 3, requester: 4 };
+    const assignable = people
+      .filter((p) => p.userId)
+      .sort((a, b) => (order[a.role] ?? 9) - (order[b.role] ?? 9) || (a.name || a.email || "").localeCompare(b.name || b.email || ""));
+    if (!assignable.length) {
+      $("fAssignees").innerHTML = `<span class="check-empty">No people yet — invite staff under People &amp; roles first.</span>`;
+      return;
+    }
     $("fAssignees").innerHTML = assignable.map((p) => {
       const name = p.name || p.email || "User";
-      return `<label class="check-item"><input type="checkbox" value="${p.userId}" ${chosen.has(p.userId) ? "checked" : ""} /> <span>${esc(name)}</span></label>`;
+      const tag = p.role === "owner" ? " · Admin" : p.role === "requester" ? "" : " · " + (ROLE_LABEL[p.role] || p.role);
+      return `<label class="check-item"><input type="checkbox" value="${p.userId}" ${chosen.has(p.userId) ? "checked" : ""} /> <span>${esc(name)}<small class="check-tag">${esc(tag)}</small></span></label>`;
     }).join("");
   }
 
@@ -1162,7 +1197,7 @@
     refreshing = true;
     document.querySelectorAll("#refreshBtn, #portalRefresh").forEach((b) => b.classList.add("spinning"));
     try {
-      if (myRole === "requester") { await loadTasks(); renderRequests(); }
+      if (!["owner", "delegate"].includes(myRole)) { await Promise.all([loadTasks(), loadAssignees(), loadRecipients()]); renderDashboard(); }
       else { await Promise.all([loadTasks(), loadProjects()]); saveCache(); render(); detectNewRequests(); }
       if (!silent) toast("Refreshed");
     } catch (e) {
@@ -1303,21 +1338,22 @@
     e.preventDefault();
     const email = $("inviteEmail").value.trim().toLowerCase();
     const role = $("inviteRole").value;
+    const inviteName = ($("inviteName") ? $("inviteName").value.trim() : "");
     if (!email) return;
     // If they've already signed in, change their role directly instead.
     const existing = people.find((p) => (p.email || "").toLowerCase() === email);
     if (existing) {
       await changeRole(existing.userId, role);
-      $("inviteEmail").value = "";
+      $("inviteEmail").value = ""; if ($("inviteName")) $("inviteName").value = "";
       toast(`Role updated to ${ROLE_LABEL[role]}`);
       return;
     }
     const btn = e.target.querySelector('button[type="submit"]');
     if (btn) btn.disabled = true;
-    // 1) Record the chosen role so the sign-up trigger applies it on first sign-in.
+    // 1) Record the chosen role (+ optional name) so sign-up applies them.
     const { error: invErr } = await sb.from("role_invites").upsert(
-      { email, role, invited_by: me.id }, { onConflict: "email" });
-    if (invErr) { if (btn) btn.disabled = false; toast(invErr.message || "Couldn't save the invite — are you the Owner?"); return; }
+      { email, role, full_name: inviteName || null, invited_by: me.id }, { onConflict: "email" });
+    if (invErr) { if (btn) btn.disabled = false; toast(invErr.message || "Couldn't save the invite — are you the Admin?"); return; }
     // 2) Email a magic link that creates their account (needs sign-ups ON in Supabase).
     const { error } = await sb.auth.signInWithOtp({
       email, options: { shouldCreateUser: true, emailRedirectTo: location.origin + "/" },
@@ -1335,7 +1371,7 @@
       else toast(error.message || "Couldn't send the invite email. The role is saved.");
       return;
     }
-    $("inviteEmail").value = "";
+    $("inviteEmail").value = ""; if ($("inviteName")) $("inviteName").value = "";
     toast(`Invitation emailed to ${email} (${ROLE_LABEL[role]})`);
     loadInvites();
   });
@@ -1403,6 +1439,7 @@
   //  Requester portal (submit requests, track status, nudge)
   // ============================================================
   $("portalSignOut").addEventListener("click", async () => { await sb.auth.signOut(); });
+  if ($("portalSettings")) $("portalSettings").addEventListener("click", openSettings);
 
   // Populate the "Who is this for?" picker in the logged-in requester portal.
   async function loadPortalRecipients() {
@@ -1413,10 +1450,10 @@
       const staff = data || [];
       if (!staff.length) { box.innerHTML = `<span class="check-empty">No staff listed yet — your request goes to the whole office.</span>`; return; }
       box.innerHTML = staff.map((s) => {
-        const tag = s.role === "owner" ? " (Boss)" : "";
-        return `<label class="check-item"><input type="checkbox" value="${esc(s.id)}" /> <span>${esc(s.name)}${tag}</span></label>`;
+        const tag = s.role === "owner" ? " · Admin" : "";
+        return `<label class="check-item"><input type="checkbox" value="${esc(s.id)}" /> <span>${esc(s.name)}<small class="check-tag">${esc(tag)}</small></span></label>`;
       }).join("");
-    } catch (e) { box.innerHTML = `<span class="check-empty">Couldn't load staff — your request goes to the whole office.</span>`; }
+    } catch (e) { box.innerHTML = `<span class="check-empty">Couldn't load staff — your request goes to the whole team.</span>`; }
   }
 
   $("requestForm").addEventListener("submit", async (e) => {
@@ -1440,9 +1477,48 @@
     toast("Request submitted");
   });
 
+  function rerender() { if (["owner", "delegate"].includes(myRole)) render(); else renderDashboard(); }
+
+  function renderDashboard() { renderAssigned(); renderRequests(); }
+
+  // Tasks assigned to me or directed to me (that I didn't raise myself).
+  function renderAssigned() {
+    const box = $("assignedList");
+    if (!box) return;
+    const mine = tasks
+      .filter((t) => isMine(t) && t.requesterId !== (me && me.id))
+      .sort((a, b) => new Date(b.created) - new Date(a.created));
+    if (!mine.length) {
+      box.innerHTML = `<div class="empty-state"><div class="big">📥</div><p>Nothing assigned to you yet.</p></div>`;
+      return;
+    }
+    const canSet = can.edit();
+    box.innerHTML = mine.map((t) => {
+      const done = t.status === "completed";
+      const dueChip = t.due ? `<span class="chip due">📅 ${formatDue(t.due)}</span>` : "";
+      const from = t.source === "request" ? `<span class="chip request-chip">📨 ${esc(requesterLabel(t))}</span>` : "";
+      const control = canSet
+        ? `<select class="assigned-status" data-set="${t.id}">${STATUSES.map((s) => `<option value="${s.key}" ${t.status === s.key ? "selected" : ""}>${s.label}</option>`).join("")}</select>`
+        : `<span class="status-badge s-${t.status}">${statusLabel(t.status)}</span>`;
+      return `
+        <div class="request-row ${done ? "done" : ""}">
+          <div class="request-main">
+            <div class="request-title">${esc(t.title)}</div>
+            ${t.notes ? `<div class="list-sub">${esc(t.notes)}</div>` : ""}
+            <div class="request-meta">${from}${dueChip}</div>
+          </div>
+          ${control}
+        </div>`;
+    }).join("");
+    if (canSet) box.querySelectorAll("[data-set]").forEach((sel) =>
+      sel.addEventListener("change", () => updateTask(sel.dataset.set, { status: sel.value })));
+  }
+
   function renderRequests() {
     const list = $("requestList");
-    const mine = [...tasks].sort((a, b) => new Date(b.created) - new Date(a.created));
+    const mine = tasks
+      .filter((t) => t.requesterId === (me && me.id))
+      .sort((a, b) => new Date(b.created) - new Date(a.created));
     if (!mine.length) {
       list.innerHTML = `<div class="empty-state"><div class="big">📮</div><p>No requests yet — submit one above.</p></div>`;
       return;

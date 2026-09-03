@@ -91,21 +91,27 @@
     </div>
   </div>
 
-  <!-- Requester portal (shown to office staff with the Requester role) -->
+  <!-- Personal dashboard (staff: editor / viewer / requester) -->
   <div class="portal" id="portalScreen" hidden>
     <header class="portal-top">
       <div class="brand">
         <div class="brand-mark">✓</div>
-        <div class="brand-text"><h1>TaskTrack</h1><span>Office requests</span></div>
+        <div class="brand-text"><h1>TaskTrack</h1><span>Your dashboard</span></div>
       </div>
       <div class="portal-account">
         <span class="account-email" id="portalEmail"></span>
+        <button class="ghost-btn theme-toggle" id="portalSettings" title="Settings">⚙</button>
         <button class="ghost-btn theme-toggle" id="portalRefresh" title="Refresh">🔄</button>
         <button class="ghost-btn theme-toggle js-theme-toggle" title="Toggle light/dark">🌙</button>
         <button class="ghost-btn" id="portalSignOut">Sign out</button>
       </div>
     </header>
     <div class="portal-body">
+      <section class="portal-list" id="assignedSection">
+        <h2>Assigned to me</h2>
+        <p class="portal-hint">Tasks assigned to you and requests sent your way.</p>
+        <div id="assignedList"><!-- rendered by JS --></div>
+      </section>
       <section class="portal-new">
         <h2>Request something from the office</h2>
         <p class="portal-hint">Log what you need. You'll be able to track its status here and send a reminder if it's taking too long.</p>
@@ -397,7 +403,7 @@
     </div>
   </div>
 
-  <!-- People & roles (Owner only) -->
+  <!-- People & roles (Admin only) -->
   <div class="modal-overlay" id="peopleOverlay" hidden>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="peopleTitle">
       <div class="modal-head">
@@ -405,12 +411,13 @@
         <button class="icon-btn" id="closePeople" aria-label="Close">✕</button>
       </div>
       <div class="modal-body">
-        <p class="people-hint">Set what each person can do. Only an Owner can change roles.</p>
+        <p class="people-hint">Set what each person can do. Only an Admin can change roles.</p>
 
         <form id="inviteForm" class="invite-form">
           <input type="email" id="inviteEmail" placeholder="Add someone by email…" autocomplete="off" />
+          <input type="text" id="inviteName" placeholder="Name (optional, e.g. Managing Partner)" autocomplete="off" />
           <select id="inviteRole">
-            <option value="owner">Owner</option>
+            <option value="owner">Admin</option>
             <option value="delegate">Delegate</option>
             <option value="editor">Editor</option>
             <option value="viewer">Viewer</option>
@@ -418,7 +425,7 @@
           </select>
           <button type="submit" class="primary-btn">Add</button>
         </form>
-        <p class="invite-hint">They'll get an <strong>email invitation</strong> with a sign-in link, and this role is applied automatically. The main app is invitation-only — only people added here can get in.</p>
+        <p class="invite-hint">They'll get an <strong>email invitation</strong> with a sign-in link, and this role (and name, if set) is applied automatically. The app is invitation-only — only people added here can get in.</p>
 
         <div id="inviteList" class="invite-list"><!-- pending invites --></div>
 
