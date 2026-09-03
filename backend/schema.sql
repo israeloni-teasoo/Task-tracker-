@@ -106,6 +106,20 @@ create table public.task_attachments (
 );
 create index task_attachments_task_idx on public.task_attachments(task_id);
 
+-- Multiple assignees per task, and the recipients a request is directed to.
+create table public.task_assignees (
+  task_id    uuid not null references public.tasks(id) on delete cascade,
+  user_id    uuid not null references public.profiles(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (task_id, user_id)
+);
+create table public.task_recipients (
+  task_id    uuid not null references public.tasks(id) on delete cascade,
+  user_id    uuid not null references public.profiles(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (task_id, user_id)
+);
+
 -- Per-device Web Push subscriptions (one person can have several devices).
 create table public.push_subscriptions (
   id         uuid primary key default gen_random_uuid(),
@@ -270,6 +284,8 @@ alter table public.task_events         enable row level security;
 alter table public.push_subscriptions  enable row level security;
 alter table public.reminders           enable row level security;
 alter table public.task_attachments    enable row level security;
+alter table public.task_assignees      enable row level security;
+alter table public.task_recipients     enable row level security;
 alter table public.app_settings        enable row level security;   -- no policies: server-only
 
 -- profiles: see your own; staff see everyone; you can edit your own.
@@ -357,6 +373,19 @@ create policy att_meta_select on public.task_attachments for select
   );
 create policy att_meta_insert_staff on public.task_attachments for insert
   with check (public.is_staff() and uploaded_by = auth.uid());
+
+-- task_assignees / task_recipients: staff or the request owner may read;
+-- staff manage assignees (editor+) and recipients.
+create policy task_assignees_select on public.task_assignees for select
+  using (public.is_staff() or user_id = auth.uid()
+         or exists (select 1 from public.tasks t where t.id = task_id and t.requester_id = auth.uid()));
+create policy task_assignees_write on public.task_assignees for all
+  using (public.can_edit()) with check (public.can_edit());
+create policy task_recipients_select on public.task_recipients for select
+  using (public.is_staff() or user_id = auth.uid()
+         or exists (select 1 from public.tasks t where t.id = task_id and t.requester_id = auth.uid()));
+create policy task_recipients_write on public.task_recipients for all
+  using (public.is_staff()) with check (public.is_staff());
 
 -- push_subscriptions: you manage only your own devices.
 create policy push_own on public.push_subscriptions for all
@@ -450,6 +479,33 @@ begin
 end; $$;
 grant execute on function public.public_add_attachment(uuid, text, text, text, bigint) to anon, authenticated;
 
+-- Public staff directory (names + role only, no emails) for the office "who is
+-- this for?" picker, plus setting a request's recipients by token.
+create or replace function public.public_staff()
+returns table (id uuid, name text, role text)
+language sql security definer set search_path = public as $$
+  select p.id, coalesce(nullif(trim(p.full_name), ''), 'Staff member'), m.role::text
+    from public.memberships m join public.profiles p on p.id = m.user_id
+   where m.role in ('owner','delegate','editor','viewer')
+   order by case m.role when 'owner' then 0 when 'delegate' then 1 when 'editor' then 2 else 3 end, p.full_name nulls last;
+$$;
+grant execute on function public.public_staff() to anon, authenticated;
+
+create or replace function public.public_set_recipients(token uuid, ids uuid[])
+returns boolean language plpgsql security definer set search_path = public as $$
+declare tid uuid;
+begin
+  select id into tid from public.tasks where track_token = token and source = 'request' limit 1;
+  if tid is null then return false; end if;
+  delete from public.task_recipients where task_id = tid;
+  insert into public.task_recipients (task_id, user_id)
+    select tid, u from unnest(ids) as u
+     where exists (select 1 from public.memberships m where m.user_id = u and m.role in ('owner','delegate','editor','viewer'))
+  on conflict do nothing;
+  return true;
+end; $$;
+grant execute on function public.public_set_recipients(uuid, uuid[]) to anon, authenticated;
+
 -- ---------- Attachments storage bucket (private) ----------
 insert into storage.buckets (id, name, public) values ('attachments', 'attachments', false)
 on conflict (id) do nothing;
@@ -466,6 +522,8 @@ create policy att_obj_select on storage.objects for select to authenticated
 alter publication supabase_realtime add table public.tasks;
 alter publication supabase_realtime add table public.projects;
 alter publication supabase_realtime add table public.task_events;
+alter publication supabase_realtime add table public.task_assignees;
+alter publication supabase_realtime add table public.task_recipients;
 
 -- ---------- Seed the starter projects ----------
 insert into public.projects (name, color, is_default, position) values

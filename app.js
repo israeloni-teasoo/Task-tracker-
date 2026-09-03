@@ -33,6 +33,7 @@
 
   // ---- State ----
   let projects = [], tasks = [], people = [];
+  let assigneesByTask = {}, recipientsByTask = {};   // task_id -> [user_id]
   let profilesById = {};
   let me = null, myRole = "requester";
   let scope = "all", view = "list", query = "";
@@ -135,6 +136,7 @@
       // Office staff: the simplified request portal.
       show($("portalScreen"));
       $("portalEmail").textContent = me.email || "";
+      loadPortalRecipients();
       loadTasks().then(() => { subscribeRealtime(); renderRequests(); });   // RLS: only their own
       return;
     }
@@ -142,7 +144,7 @@
     // Boss / delegate / editor / viewer: the full app.
     show(appEl);
     renderAccount();
-    Promise.all([loadProjects(), loadTasks(), loadPeople()]).then(() => {
+    Promise.all([loadProjects(), loadTasks(), loadPeople(), loadAssignees(), loadRecipients()]).then(() => {
       primeSeen();             // seed before realtime so existing requests don't toast
       primeFlagged();          // seed so existing reminders don't chime
       saveCache();
@@ -305,6 +307,13 @@
   }
   $("setPwBtn").addEventListener("click", setPassword);
 
+  // ---- Settings modal ----
+  function openSettings() { closeSheet && closeSheet(); reflectNotifState(); show($("settingsOverlay")); }
+  function closeSettings() { hide($("settingsOverlay")); }
+  $("settingsBtn").addEventListener("click", openSettings);
+  $("closeSettings").addEventListener("click", closeSettings);
+  $("settingsOverlay").addEventListener("click", (e) => { if (e.target === $("settingsOverlay")) closeSettings(); });
+
   function renderAccount() {
     if (!me) return;
     const email = me.email || "";
@@ -346,6 +355,18 @@
       if (error) throw error;
       tasks = (data || []).map(taskFromRow);
     } catch (e) { fromCache("tasks"); }
+  }
+
+  function groupByTask(rows) {
+    const m = {};
+    (rows || []).forEach((r) => { (m[r.task_id] = m[r.task_id] || []).push(r.user_id); });
+    return m;
+  }
+  async function loadAssignees() {
+    try { const { data } = await sb.from("task_assignees").select("task_id, user_id"); assigneesByTask = groupByTask(data); } catch (e) {}
+  }
+  async function loadRecipients() {
+    try { const { data } = await sb.from("task_recipients").select("task_id, user_id"); recipientsByTask = groupByTask(data); } catch (e) {}
   }
 
   async function loadPeople() {
@@ -462,6 +483,8 @@
           // Refresh the activity thread live if its task's modal is open.
           if (openTaskId && p.new && p.new.task_id === openTaskId && overlay && !overlay.hidden) loadThread(openTaskId);
         })
+        .on("postgres_changes", { event: "*", schema: "public", table: "task_assignees" }, () => { loadAssignees().then(render); })
+        .on("postgres_changes", { event: "*", schema: "public", table: "task_recipients" }, () => { loadRecipients().then(render); })
         .subscribe();
     } catch (e) { /* realtime is best-effort */ }
   }
@@ -533,7 +556,7 @@
   // ============================================================
   function visibleTasks() {
     return tasks.filter((t) => {
-      if (scope === "mine" && t.assigneeId !== (me && me.id)) return false;
+      if (scope === "mine" && !isMine(t)) return false;
       if (scope === "today" && dueState(t.due) !== "today") return false;
       if (scope === "overdue" && dueState(t.due) !== "overdue") return false;
       if (scope === "attention" && !t.needsAttention) return false;
@@ -619,7 +642,7 @@
       if (ds === "today") today++; if (ds === "overdue") overdue++;
       if (t.needsAttention) attention++;
       if (t.status === "completed") completed++;
-      if (t.assigneeId === (me && me.id)) mine++;
+      if (isMine(t)) mine++;
     });
     setCount("all", tasks.length); setCount("today", today); setCount("mine", mine);
     setCount("overdue", overdue); setCount("attention", attention); setCount("completed", completed);
@@ -635,11 +658,27 @@
 
   const requestChip = (t) => t.source === "request" ? `<span class="chip request-chip">📨 ${esc(requesterLabel(t))}</span>` : "";
   const attentionChip = (t) => t.needsAttention ? `<span class="chip attention-chip">⚠ Needs attention</span>` : "";
+  // "My tasks" = assigned to me, or a request directed to me.
+  function isMine(t) {
+    const uid = me && me.id;
+    if (!uid) return false;
+    return (assigneesByTask[t.id] || []).includes(uid) || (recipientsByTask[t.id] || []).includes(uid);
+  }
+  const nameOf = (id) => { const p = profilesById[id]; return p ? (p.name || p.email || "User") : "User"; };
+  function multiLabel(ids) {
+    const names = ids.map(nameOf);
+    return names.length <= 1 ? (names[0] || "") : `${names[0]} +${names.length - 1}`;
+  }
   function assigneeChip(t) {
-    if (!t.assigneeId) return "";
-    const p = profilesById[t.assigneeId];
-    const name = p ? (p.name || p.email || "User") : "User";
-    return `<span class="chip assignee-chip" title="Assigned to ${esc(name)}">👤 ${esc(name)}</span>`;
+    const ids = assigneesByTask[t.id] || [];
+    if (!ids.length) return "";
+    return `<span class="chip assignee-chip" title="Assigned: ${esc(ids.map(nameOf).join(", "))}">👤 ${esc(multiLabel(ids))}</span>`;
+  }
+  function recipientChip(t) {
+    if (t.source !== "request") return "";
+    const ids = recipientsByTask[t.id] || [];
+    if (!ids.length) return "";
+    return `<span class="chip recipient-chip" title="Requested from: ${esc(ids.map(nameOf).join(", "))}">📩 ${esc(multiLabel(ids))}</span>`;
   }
 
   function cardMarkup(t) {
@@ -651,7 +690,7 @@
       <div class="card prio-${t.priority} ${t.status === "completed" ? "done" : ""} ${t.needsAttention ? "flagged" : ""}" ${drag} data-id="${t.id}">
         <div class="card-title">${esc(t.title)}</div>
         ${notes}
-        <div class="card-meta">${attentionChip(t)}${assigneeChip(t)}${requestChip(t)}${projectChip(t)}<span class="chip prio ${t.priority}">${t.priority}</span>${dueChip}</div>
+        <div class="card-meta">${attentionChip(t)}${assigneeChip(t)}${recipientChip(t)}${requestChip(t)}${projectChip(t)}<span class="chip prio ${t.priority}">${t.priority}</span>${dueChip}</div>
       </div>`;
   }
 
@@ -685,7 +724,7 @@
               <div class="list-title">${esc(t.title)}</div>
               ${t.notes ? `<div class="list-sub">${esc(t.notes)}</div>` : ""}
             </div>
-            <div class="list-meta">${attentionChip(t)}${assigneeChip(t)}${requestChip(t)}${projectChip(t)}<span class="chip prio ${t.priority}">${t.priority}</span>${dueChip}</div>
+            <div class="list-meta">${attentionChip(t)}${assigneeChip(t)}${recipientChip(t)}${requestChip(t)}${projectChip(t)}<span class="chip prio ${t.priority}">${t.priority}</span>${dueChip}</div>
             ${t.status === "completed" && can.edit() ? `<button class="ghost-btn restore-btn" data-restore="${t.id}" title="Bring this task back">↩ Restore</button>` : ""}
           </div>`;
       }).join("");
@@ -763,8 +802,21 @@
   async function createTask(data) {
     const row = { ...rowFromTask(data), source: "internal", created_by: me.id };
     const { data: inserted, error } = await sb.from("tasks").insert(row).select().single();
-    if (error) return failWrite(error);
+    if (error) { failWrite(error); return null; }
     upsertLocal(tasks, taskFromRow(inserted)); saveCache(); render();
+    return inserted.id;
+  }
+
+  // Persist the multi-assignee set for a task (diff insert/delete).
+  async function setTaskAssignees(taskId, ids) {
+    const cur = assigneesByTask[taskId] || [];
+    const toAdd = ids.filter((x) => !cur.includes(x));
+    const toDel = cur.filter((x) => !ids.includes(x));
+    try {
+      if (toAdd.length) await sb.from("task_assignees").insert(toAdd.map((u) => ({ task_id: taskId, user_id: u })));
+      if (toDel.length) await sb.from("task_assignees").delete().eq("task_id", taskId).in("user_id", toDel);
+    } catch (e) { console.warn("assignee save failed", e); }
+    assigneesByTask[taskId] = ids.slice();
   }
   async function updateTask(id, patch) {
     const task = tasks.find((t) => t.id === id);
@@ -822,16 +874,15 @@
       `<option value="${p.id}" ${p.id === selectedId ? "selected" : ""}>${esc(p.name)}</option>`).join("");
   }
 
-  // Only people who can act on tasks can be assignees.
-  function fillAssigneeOptions(selectedId) {
+  // Only people who can act on tasks can be assignees. Multi-select checkboxes.
+  function fillAssigneeOptions(selectedIds) {
+    const chosen = new Set(selectedIds || []);
     const assignable = people.filter((p) => ["owner", "delegate", "editor"].includes(p.role));
-    const opts = [`<option value="">— Unassigned —</option>`].concat(
-      assignable.map((p) => {
-        const name = p.name || p.email || "User";
-        return `<option value="${p.userId}" ${p.userId === selectedId ? "selected" : ""}>${esc(name)}</option>`;
-      })
-    );
-    $("fAssignee").innerHTML = opts.join("");
+    if (!assignable.length) { $("fAssignees").innerHTML = `<span class="check-empty">No staff to assign yet.</span>`; return; }
+    $("fAssignees").innerHTML = assignable.map((p) => {
+      const name = p.name || p.email || "User";
+      return `<label class="check-item"><input type="checkbox" value="${p.userId}" ${chosen.has(p.userId) ? "checked" : ""} /> <span>${esc(name)}</span></label>`;
+    }).join("");
   }
 
   function openModal(id) {
@@ -843,7 +894,7 @@
     $("fTitle").value = t ? t.title : "";
     $("fNotes").value = t ? t.notes || "" : "";
     fillProjectOptions(t ? t.projectId : scoped);
-    fillAssigneeOptions(t ? t.assigneeId : "");
+    fillAssigneeOptions(t ? (assigneesByTask[t.id] || []) : []);
     $("fPriority").value = t ? t.priority : "medium";
     $("fStatus").value = t ? t.status : "pending";
     $("fDue").value = t ? toInputDateTime(t.due) : "";
@@ -864,12 +915,20 @@
       title: $("fTitle").value.trim(), notes: $("fNotes").value.trim(),
       projectId: projectSelect.value, priority: $("fPriority").value,
       status: $("fStatus").value, due: fromInputDateTime($("fDue").value),
-      assigneeId: $("fAssignee").value || "",
     };
     if (!data.title) return;
+    const assignees = Array.from(document.querySelectorAll('#fAssignees input:checked')).map((c) => c.value);
     closeModal();
-    if (id) { await updateTask(id, data); toast("Task updated"); }
-    else { await createTask(data); toast("Task added"); }
+    if (id) {
+      await updateTask(id, data);
+      await setTaskAssignees(id, assignees);
+      render();
+      toast("Task updated");
+    } else {
+      const newId = await createTask(data);
+      if (newId) { await setTaskAssignees(newId, assignees); render(); }
+      toast("Task added");
+    }
   });
 
   deleteBtn.addEventListener("click", async () => {
@@ -1091,9 +1150,7 @@
   });
   $("mNewProjectBtn").addEventListener("click", () => { closeSheet(); openProjectModal(null); });
   $("mPeopleBtn").addEventListener("click", () => { closeSheet(); openPeople(); });
-  $("mSetPwBtn").addEventListener("click", () => { closeSheet(); setPassword(); });
-  $("mExportBtn").addEventListener("click", () => { closeSheet(); exportBackup(); });
-  $("mImportBtn").addEventListener("click", () => { closeSheet(); $("importFile").click(); });
+  $("mSettingsBtn").addEventListener("click", () => { closeSheet(); openSettings(); });
   $("mSignOutBtn").addEventListener("click", async () => { await sb.auth.signOut(); });
 
   // ---- Refresh (manual + automatic) ----
@@ -1347,10 +1404,26 @@
   // ============================================================
   $("portalSignOut").addEventListener("click", async () => { await sb.auth.signOut(); });
 
+  // Populate the "Who is this for?" picker in the logged-in requester portal.
+  async function loadPortalRecipients() {
+    const box = $("rRecipients");
+    if (!box) return;
+    try {
+      const { data } = await sb.rpc("public_staff");
+      const staff = data || [];
+      if (!staff.length) { box.innerHTML = `<span class="check-empty">No staff listed yet — your request goes to the whole office.</span>`; return; }
+      box.innerHTML = staff.map((s) => {
+        const tag = s.role === "owner" ? " (Boss)" : "";
+        return `<label class="check-item"><input type="checkbox" value="${esc(s.id)}" /> <span>${esc(s.name)}${tag}</span></label>`;
+      }).join("");
+    } catch (e) { box.innerHTML = `<span class="check-empty">Couldn't load staff — your request goes to the whole office.</span>`; }
+  }
+
   $("requestForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const title = $("rTitle").value.trim();
     if (!title) return;
+    const recipientIds = Array.from(document.querySelectorAll('#rRecipients input:checked')).map((c) => c.value);
     const row = {
       title, notes: $("rNotes").value.trim(), due: fromInputDateTime($("rDue").value) || null,
       priority: $("rPriority").value, status: "pending", source: "request",
@@ -1358,6 +1431,9 @@
     };
     const { data, error } = await sb.from("tasks").insert(row).select().single();
     if (error) { toast(error.message || "Could not submit request"); return; }
+    if (recipientIds.length && data && data.track_token) {
+      try { await sb.rpc("public_set_recipients", { token: data.track_token, ids: recipientIds }); } catch (_) {}
+    }
     upsertLocal(tasks, taskFromRow(data));
     e.target.reset();
     renderRequests();
@@ -1427,23 +1503,49 @@
   // ============================================================
   //  Web Push notifications (device alerts)
   // ============================================================
+  function notifSupported() {
+    return ("serviceWorker" in navigator) && ("PushManager" in window) && ("Notification" in window) && !!CFG.vapidPublicKey;
+  }
+
   function setupNotifications() {
-    const btns = [$("notifBtn"), $("mNotifBtn")].filter(Boolean);
-    if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) return;
-    if (!CFG.vapidPublicKey || !can.edit()) return;   // only people who receive nudges
-    if (Notification.permission === "granted") { btns.forEach((b) => (b.hidden = true)); ensureSubscribed(); return; }
-    if (Notification.permission === "denied") return;
-    btns.forEach((b) => {
-      b.hidden = false;
-      b.onclick = async () => {
-        closeSheet();
-        const perm = await Notification.requestPermission();
-        if (perm !== "granted") { toast("Notifications not enabled"); return; }
-        await ensureSubscribed();
-        btns.forEach((x) => (x.hidden = true));
-        toast("Notifications enabled on this device");
-      };
-    });
+    reflectNotifState();
+    if (!notifSupported() || !can.edit()) return;
+    if (Notification.permission === "granted") { ensureSubscribed(); return; }
+    // On by default: ask once automatically the first time a staff member enters
+    // (harmless if the browser requires a gesture — the Settings toggle remains).
+    if (Notification.permission === "default") {
+      let asked = false;
+      try { asked = !!localStorage.getItem("tasktrack.notifAsked"); } catch (e) {}
+      if (!asked) {
+        try { localStorage.setItem("tasktrack.notifAsked", "1"); } catch (e) {}
+        enableNotifications(true);
+      }
+    }
+  }
+
+  async function enableNotifications(silent) {
+    if (!notifSupported()) { if (!silent) toast("This browser can't do device notifications"); return; }
+    let perm;
+    try { perm = await Notification.requestPermission(); } catch (e) { return; }
+    if (perm !== "granted") { if (!silent) toast("Allow notifications in your browser to turn them on"); reflectNotifState(); return; }
+    await ensureSubscribed();
+    reflectNotifState();
+    if (!silent) toast("Notifications on for this device");
+  }
+
+  // Keep the Settings row + mobile button in sync with the browser's state.
+  function reflectNotifState() {
+    const supported = notifSupported() && can.edit();
+    const perm = ("Notification" in window) ? Notification.permission : "unsupported";
+    const status = $("notifStatus"), btn = $("notifBtn"), mBtn = $("mNotifBtn");
+    if (status) {
+      status.textContent = !supported ? "Not available for your role on this device."
+        : perm === "granted" ? "On — you'll get a push when a reminder comes in."
+        : perm === "denied" ? "Blocked in your browser. Allow notifications in site settings to turn on."
+        : "Get a push on this device when a reminder comes in.";
+    }
+    if (btn) { btn.hidden = !supported || perm === "granted" || perm === "denied"; btn.onclick = () => enableNotifications(false); }
+    if (mBtn) { mBtn.hidden = !supported || perm !== "default"; mBtn.onclick = () => { if (typeof closeSheet === "function") closeSheet(); enableNotifications(false); }; }
   }
 
   async function ensureSubscribed() {

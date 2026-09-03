@@ -132,6 +132,11 @@
               </select>
             </label>
           </div>
+          <div class="field">
+            <span>Who is this for?</span>
+            <div id="rRecipients" class="check-group"><span class="check-empty">Loading staff…</span></div>
+            <small class="field-help">Pick who should handle it. Leave empty to send to the whole office.</small>
+          </div>
           <button type="submit" class="primary-btn wide">Submit request</button>
         </form>
       </section>
@@ -191,8 +196,7 @@
       </nav>
 
       <div class="sidebar-footer">
-        <button class="ghost-btn notif-btn" id="setPwBtn" title="Change your password">🔑 Change password</button>
-        <button class="ghost-btn notif-btn" id="notifBtn" hidden title="Get notified on this device">🔔 Enable notifications</button>
+        <button class="ghost-btn notif-btn" id="settingsBtn" title="Settings">⚙ Settings</button>
         <div class="account" id="account" hidden>
           <div class="account-avatar" id="accountAvatar">?</div>
           <div class="account-info">
@@ -201,11 +205,7 @@
           </div>
           <button class="row-edit" id="signOutBtn" title="Sign out" aria-label="Sign out">⎋</button>
         </div>
-        <div class="footer-actions">
-          <button class="ghost-btn" id="exportBtn" title="Download a backup of all your tasks">⬇ Export</button>
-          <button class="ghost-btn" id="importBtn" title="Restore tasks from a backup file">⬆ Import</button>
-          <input type="file" id="importFile" accept="application/json" hidden />
-        </div>
+        <input type="file" id="importFile" accept="application/json" hidden />
       </div>
     </aside>
 
@@ -303,10 +303,10 @@
             <input type="datetime-local" id="fDue" />
           </label>
         </div>
-        <label class="field">
+        <div class="field">
           <span>Assign to</span>
-          <select id="fAssignee"><!-- options rendered by JS --></select>
-        </label>
+          <div id="fAssignees" class="check-group"><!-- staff checkboxes rendered by JS --></div>
+        </div>
         <div class="modal-foot">
           <button type="button" class="danger-btn" id="deleteTask" hidden>Delete</button>
           <div class="spacer"></div>
@@ -358,6 +358,42 @@
           <button type="submit" class="primary-btn">Save project</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- ===== Settings ===== -->
+  <div class="modal-overlay" id="settingsOverlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <div class="modal-head">
+        <h3 id="settingsTitle">Settings</h3>
+        <button class="icon-btn" id="closeSettings" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="setting-row">
+          <div class="setting-text">
+            <div class="setting-name">Device notifications</div>
+            <div class="setting-sub" id="notifStatus">Get a push on this device when a reminder comes in.</div>
+          </div>
+          <button type="button" class="primary-btn" id="notifBtn">Turn on</button>
+        </div>
+        <div class="setting-row">
+          <div class="setting-text">
+            <div class="setting-name">Password</div>
+            <div class="setting-sub">Change the password you use to sign in.</div>
+          </div>
+          <button type="button" class="ghost-btn" id="setPwBtn">🔑 Change</button>
+        </div>
+        <div class="setting-row">
+          <div class="setting-text">
+            <div class="setting-name">Backup</div>
+            <div class="setting-sub">Download or restore all tasks as a file.</div>
+          </div>
+          <div class="setting-actions">
+            <button type="button" class="ghost-btn" id="exportBtn">⬇ Export</button>
+            <button type="button" class="ghost-btn" id="importBtn">⬆ Import</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -417,10 +453,7 @@
         <button class="ghost-btn" data-msheet-scope="completed">✅ Completed log</button>
         <button class="ghost-btn" id="mPeopleBtn" hidden>👥 People &amp; roles</button>
         <button class="ghost-btn js-theme-toggle">🌙 Theme</button>
-        <button class="ghost-btn" id="mNotifBtn" hidden>🔔 Notifications</button>
-        <button class="ghost-btn" id="mSetPwBtn">🔑 Set a password</button>
-        <button class="ghost-btn" id="mExportBtn">⬇ Export</button>
-        <button class="ghost-btn" id="mImportBtn">⬆ Import</button>
+        <button class="ghost-btn" id="mSettingsBtn">⚙ Settings</button>
         <button class="ghost-btn danger-btn" id="mSignOutBtn">⎋ Sign out</button>
       </div>
     </div>

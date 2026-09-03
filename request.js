@@ -33,6 +33,21 @@
     return false;
   }
 
+  // Load the staff directory so the requester can choose who to send to.
+  (async () => {
+    const box = $("rRecipients");
+    if (!box || !sb) return;
+    try {
+      const { data } = await sb.rpc("public_staff");
+      const staff = data || [];
+      if (!staff.length) { box.innerHTML = `<span class="check-empty">No staff listed yet — your request goes to the whole office.</span>`; return; }
+      box.innerHTML = staff.map((s) => {
+        const tag = s.role === "owner" ? " (Boss)" : "";
+        return `<label class="check-item"><input type="checkbox" value="${esc(s.id)}" /> <span>${esc(s.name)}${tag}</span></label>`;
+      }).join("");
+    } catch (e) { box.innerHTML = `<span class="check-empty">Couldn't load staff — your request goes to the whole office.</span>`; }
+  })();
+
   $("requestForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!sb) { msg("Configuration error — please tell the office.", true); return; }
@@ -78,10 +93,15 @@
         } catch (e) { fileNote = " (couldn't attach the file)"; }
       }
     }
+    // Recipients ("who is this for?").
+    const recipientIds = Array.from(document.querySelectorAll('#rRecipients input:checked')).map((c) => c.value);
+    if (recipientIds.length) { try { await sb.rpc("public_set_recipients", { token, ids: recipientIds }); } catch (e) { /* non-fatal */ } }
+
     btn.disabled = false; btn.textContent = "Submit request";
 
     remember(token, title);
     e.target.reset();
+    // Re-check nothing after reset (form.reset clears checkboxes already).
     msg("✓ Sent! It's now on their list. You can track it below." + fileNote, !!fileNote);
     showTrackLink(token);
     renderTracked();
