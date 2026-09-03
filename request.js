@@ -41,13 +41,14 @@
     if (!name || !title) return;
     if (tooSoon("tasktrack.lastsubmit", 8000)) { msg("Please wait a few seconds before submitting again.", true); return; }
 
+    const dueVal = $("rDue").value;
     const token = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now()) + Math.random().toString(36).slice(2);
     const row = {
       title,
       notes: $("rNotes").value.trim(),
       requester_name: name,
       requester_department: $("rDept").value.trim() || null,
-      due: $("rDue").value || null,
+      due: dueVal ? new Date(dueVal).toISOString() : null,
       priority: $("rPriority").value,
       status: "pending",
       source: "request",
@@ -57,13 +58,31 @@
     const btn = $("rSubmit");
     btn.disabled = true; btn.textContent = "Submitting…";
     const { error } = await sb.from("tasks").insert(row);
-    btn.disabled = false; btn.textContent = "Submit request";
 
-    if (error) { msg(error.message || "Could not submit — please try again.", true); return; }
+    if (error) { btn.disabled = false; btn.textContent = "Submit request"; msg(error.message || "Could not submit — please try again.", true); return; }
+
+    // Optional attachment (uploads to the private bucket; linked by token).
+    const file = $("rFile") && $("rFile").files && $("rFile").files[0];
+    let fileNote = "";
+    if (file) {
+      if (file.size > 10 * 1024 * 1024) {
+        fileNote = " (the file was too large to attach — 10 MB max)";
+      } else {
+        btn.textContent = "Uploading file…";
+        try {
+          const safe = file.name.replace(/[^\w.\-]+/g, "_");
+          const path = `${token}/${Date.now()}-${safe}`;
+          const up = await sb.storage.from("attachments").upload(path, file, { contentType: file.type || "application/octet-stream" });
+          if (up.error) fileNote = " (couldn't attach the file)";
+          else await sb.rpc("public_add_attachment", { token, p: path, fname: file.name, ctype: file.type, fsize: file.size });
+        } catch (e) { fileNote = " (couldn't attach the file)"; }
+      }
+    }
+    btn.disabled = false; btn.textContent = "Submit request";
 
     remember(token, title);
     e.target.reset();
-    msg("✓ Sent! It's now on their list. You can track it below.", false);
+    msg("✓ Sent! It's now on their list. You can track it below." + fileNote, !!fileNote);
     showTrackLink(token);
     renderTracked();
   });
@@ -141,15 +160,20 @@
     if (!list.length) { section.hidden = true; return; }
     section.hidden = false;
     box.innerHTML = list.map((r) => `
-      <div class="request-row" data-token="${esc(r.token)}">
-        <div class="request-main">
-          <div class="request-title">${esc(r.title)}</div>
-          <div class="request-meta"><span class="status-badge s-pending" data-status>Checking…</span></div>
+      <div class="request-row col" data-token="${esc(r.token)}">
+        <div class="request-toprow">
+          <div class="request-main">
+            <div class="request-title">${esc(r.title)}</div>
+            <div class="request-meta"><span class="status-badge s-pending" data-status>Checking…</span></div>
+          </div>
+          <button class="ghost-btn nudge-btn" data-nudge="${esc(r.token)}" disabled>Send Reminder</button>
         </div>
-        <button class="ghost-btn nudge-btn" data-nudge="${esc(r.token)}" disabled>Send Reminder</button>
+        <button class="linklike thread-toggle" data-thread="${esc(r.token)}">💬 Comments</button>
+        <div class="mini-thread" data-box="${esc(r.token)}" hidden></div>
       </div>`).join("");
 
     box.querySelectorAll("[data-nudge]").forEach((b) => b.addEventListener("click", () => nudge(b.dataset.nudge, b)));
+    box.querySelectorAll("[data-thread]").forEach((b) => b.addEventListener("click", () => toggleThread(b.dataset.thread)));
 
     // Look up live status for each token via the security-definer RPC.
     for (const r of list) {
@@ -177,6 +201,49 @@
         }
       } catch (e) { /* leave as checking */ }
     }
+  }
+
+  // ---- Per-request comment thread (public, by token) ----
+  async function toggleThread(token) {
+    const el = document.querySelector(`[data-box="${cssEsc(token)}"]`);
+    if (!el) return;
+    if (!el.hidden) { el.hidden = true; return; }
+    el.hidden = false;
+    el.innerHTML = `<div class="mini-empty">Loading…</div>`;
+    await loadMiniThread(token, el);
+  }
+
+  async function loadMiniThread(token, el) {
+    let items = [];
+    try {
+      const { data } = await sb.rpc("public_request_events", { token });
+      items = data || [];
+    } catch (e) { /* show empty */ }
+    const rows = items.length ? items.map((ev) => {
+      const when = new Date(ev.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+      if (ev.type === "nudge") return `<div class="mini-item sys">🔔 Reminder sent · ${esc(when)}</div>`;
+      if (ev.type === "status_change") return `<div class="mini-item sys">${esc(ev.message || "Updated")} · ${esc(when)}</div>`;
+      return `<div class="mini-item"><b>${esc(ev.author || "")}</b> <span class="mini-when">${esc(when)}</span><div>${esc(ev.message || "")}</div></div>`;
+    }).join("") : `<div class="mini-empty">No comments yet.</div>`;
+    el.innerHTML = `<div class="mini-list">${rows}</div>
+      <div class="mini-compose">
+        <input type="text" placeholder="Add a comment…" data-cinput maxlength="2000" />
+        <button type="button" class="ghost-btn" data-csend>Send</button>
+      </div>`;
+    el.querySelector("[data-csend]").addEventListener("click", () => postMiniComment(token, el));
+    el.querySelector("[data-cinput]").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); postMiniComment(token, el); } });
+  }
+
+  async function postMiniComment(token, el) {
+    const input = el.querySelector("[data-cinput]");
+    const body = input.value.trim();
+    if (!body) return;
+    input.value = "";
+    try {
+      const { data, error } = await sb.rpc("public_add_comment", { token, body });
+      if (error || data === false) { toast("Couldn't post the comment."); input.value = body; return; }
+    } catch (e) { toast("Couldn't post the comment."); input.value = body; return; }
+    await loadMiniThread(token, el);
   }
 
   // One reminder per request every 30 minutes (matches the server-side limit).

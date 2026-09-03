@@ -63,7 +63,8 @@ create table public.tasks (
   project_id      uuid references public.projects(id) on delete set null,
   priority        task_priority not null default 'medium',
   status          task_status not null default 'pending',
-  due             date,
+  due             timestamptz,
+  assignee_id     uuid references public.profiles(id) on delete set null, -- staff the task is assigned to
   source          task_source not null default 'internal',
   requester_id    uuid references public.profiles(id) on delete set null, -- who asked (logged-in)
   requester_name  text,                                -- who asked (public link, no account)
@@ -77,6 +78,7 @@ create table public.tasks (
 );
 create index tasks_requester_idx on public.tasks(requester_id);
 create index tasks_status_idx    on public.tasks(status);
+create index tasks_assignee_idx  on public.tasks(assignee_id);
 
 -- Comments, nudges, reminders and status-change history on a task.
 create table public.task_events (
@@ -88,6 +90,21 @@ create table public.task_events (
   created_at timestamptz not null default now()
 );
 create index task_events_task_idx on public.task_events(task_id);
+
+-- Files attached to a task / office request. Bytes live in the Storage bucket
+-- 'attachments'; this table holds the metadata.
+create table public.task_attachments (
+  id           uuid primary key default gen_random_uuid(),
+  task_id      uuid not null references public.tasks(id) on delete cascade,
+  path         text not null,
+  filename     text not null,
+  content_type text,
+  size         bigint,
+  uploaded_by  uuid references public.profiles(id) on delete set null,
+  track_token  uuid,
+  created_at   timestamptz not null default now()
+);
+create index task_attachments_task_idx on public.task_attachments(task_id);
 
 -- Per-device Web Push subscriptions (one person can have several devices).
 create table public.push_subscriptions (
@@ -252,6 +269,7 @@ alter table public.tasks               enable row level security;
 alter table public.task_events         enable row level security;
 alter table public.push_subscriptions  enable row level security;
 alter table public.reminders           enable row level security;
+alter table public.task_attachments    enable row level security;
 alter table public.app_settings        enable row level security;   -- no policies: server-only
 
 -- profiles: see your own; staff see everyone; you can edit your own.
@@ -331,6 +349,15 @@ create policy events_insert on public.task_events for insert
     )
   );
 
+-- task_attachments: staff or the request's owner may read; staff insert as self.
+create policy att_meta_select on public.task_attachments for select
+  using (
+    public.is_staff()
+    or exists (select 1 from public.tasks t where t.id = task_id and t.requester_id = auth.uid())
+  );
+create policy att_meta_insert_staff on public.task_attachments for insert
+  with check (public.is_staff() and uploaded_by = auth.uid());
+
 -- push_subscriptions: you manage only your own devices.
 create policy push_own on public.push_subscriptions for all
   using (user_id = auth.uid()) with check (user_id = auth.uid());
@@ -380,6 +407,58 @@ begin
 end;
 $$;
 grant execute on function public.public_nudge(uuid) to anon, authenticated;
+
+-- Public activity thread (by token) + posting a comment as an accountless submitter.
+create or replace function public.public_request_events(token uuid)
+returns table (type text, message text, created_at timestamptz, author text)
+language sql security definer set search_path = public as $$
+  select e.type::text, e.message, e.created_at,
+         coalesce(p.full_name, p.email,
+                  case when e.user_id is null then 'Requester' else 'Staff' end) as author
+    from public.task_events e
+    join public.tasks t on t.id = e.task_id
+    left join public.profiles p on p.id = e.user_id
+   where t.track_token = token and t.source = 'request'
+     and e.type in ('comment', 'nudge', 'status_change')
+   order by e.created_at asc;
+$$;
+grant execute on function public.public_request_events(uuid) to anon, authenticated;
+
+create or replace function public.public_add_comment(token uuid, body text)
+returns boolean language plpgsql security definer set search_path = public as $$
+declare tid uuid;
+begin
+  if body is null or length(trim(body)) = 0 or length(body) > 2000 then return false; end if;
+  select id into tid from public.tasks where track_token = token and source = 'request' limit 1;
+  if tid is null then return false; end if;
+  insert into public.task_events (task_id, user_id, type, message) values (tid, null, 'comment', trim(body));
+  return true;
+end; $$;
+grant execute on function public.public_add_comment(uuid, text) to anon, authenticated;
+
+-- Accountless /office attachment upload: record metadata against a request by token.
+create or replace function public.public_add_attachment(
+  token uuid, p text, fname text, ctype text, fsize bigint)
+returns boolean language plpgsql security definer set search_path = public as $$
+declare tid uuid;
+begin
+  select id into tid from public.tasks where track_token = token and source = 'request' limit 1;
+  if tid is null then return false; end if;
+  insert into public.task_attachments (task_id, path, filename, content_type, size, track_token)
+  values (tid, p, fname, ctype, fsize, token);
+  return true;
+end; $$;
+grant execute on function public.public_add_attachment(uuid, text, text, text, bigint) to anon, authenticated;
+
+-- ---------- Attachments storage bucket (private) ----------
+insert into storage.buckets (id, name, public) values ('attachments', 'attachments', false)
+on conflict (id) do nothing;
+drop policy if exists att_obj_insert on storage.objects;
+create policy att_obj_insert on storage.objects for insert to anon, authenticated
+  with check (bucket_id = 'attachments');
+drop policy if exists att_obj_select on storage.objects;
+create policy att_obj_select on storage.objects for select to authenticated
+  using (bucket_id = 'attachments');
 
 -- ---------- Enable realtime (live cross-device sync) ----------
 -- Adds these tables to Supabase's realtime publication so the app receives

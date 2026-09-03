@@ -117,7 +117,7 @@
           <div class="field-row">
             <label class="field">
               <span>Needed by (optional)</span>
-              <input type="date" id="rDue" />
+              <input type="datetime-local" id="rDue" />
             </label>
             <label class="field">
               <span>Priority</span>
@@ -154,6 +154,10 @@
         <button class="filter-btn active" data-scope="all">
           <span class="dot" style="background:var(--c-accent)"></span> All tasks
           <span class="count" data-count="all">0</span>
+        </button>
+        <button class="filter-btn" data-scope="mine">
+          <span class="dot" style="background:#8b5cf6"></span> My tasks
+          <span class="count" data-count="mine">0</span>
         </button>
         <button class="filter-btn" data-scope="today">
           <span class="dot" style="background:#f59e0b"></span> Due today
@@ -291,10 +295,14 @@
             </select>
           </label>
           <label class="field">
-            <span>Due date</span>
-            <input type="date" id="fDue" />
+            <span>Due</span>
+            <input type="datetime-local" id="fDue" />
           </label>
         </div>
+        <label class="field">
+          <span>Assign to</span>
+          <select id="fAssignee"><!-- options rendered by JS --></select>
+        </label>
         <div class="modal-foot">
           <button type="button" class="danger-btn" id="deleteTask" hidden>Delete</button>
           <div class="spacer"></div>
@@ -302,6 +310,23 @@
           <button type="submit" class="primary-btn">Save task</button>
         </div>
       </form>
+
+      <!-- Attachments + activity thread (only when editing an existing task) -->
+      <div class="modal-body task-extra" id="taskExtra" hidden>
+        <div class="task-section">
+          <div class="task-section-head">Attachments</div>
+          <div id="attList" class="att-list"></div>
+          <label class="upload-inline"><input type="file" id="attInput" hidden />📎 Add file</label>
+        </div>
+        <div class="task-section">
+          <div class="task-section-head">Activity</div>
+          <div id="threadList" class="thread-list"></div>
+          <div class="thread-compose">
+            <input type="text" id="threadInput" placeholder="Write a comment…" maxlength="2000" />
+            <button type="button" class="primary-btn" id="threadSend">Send</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 

@@ -57,6 +57,7 @@
   const taskFromRow = (r) => ({
     id: r.id, title: r.title, notes: r.notes || "", projectId: r.project_id,
     priority: r.priority, status: r.status, due: r.due || "",
+    assigneeId: r.assignee_id || "",
     source: r.source, requesterId: r.requester_id, needsAttention: !!r.needs_attention,
     requesterName: r.requester_name || "", requesterDept: r.requester_department || "",
     created: r.created_at,
@@ -64,6 +65,7 @@
   const rowFromTask = (t) => ({
     title: t.title, notes: t.notes, project_id: t.projectId || null,
     priority: t.priority, status: t.status, due: t.due || null,
+    assignee_id: t.assigneeId || null,
   });
   const projFromRow = (r) => ({ id: r.id, name: r.name, color: r.color, isDefault: r.is_default, position: r.position });
 
@@ -445,6 +447,10 @@
       realtimeChannel = sb.channel("db-changes")
         .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, (p) => applyChange("task", p))
         .on("postgres_changes", { event: "*", schema: "public", table: "projects" }, (p) => applyChange("project", p))
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "task_events" }, (p) => {
+          // Refresh the activity thread live if its task's modal is open.
+          if (openTaskId && p.new && p.new.task_id === openTaskId && overlay && !overlay.hidden) loadThread(openTaskId);
+        })
         .subscribe();
     } catch (e) { /* realtime is best-effort */ }
   }
@@ -470,15 +476,45 @@
   // ============================================================
   //  Date helpers
   // ============================================================
-  const todayStr = () => new Date().toISOString().slice(0, 10);
-  function dueState(due) {
+  const todayStr = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  // `due` may be a plain date (legacy) or a full timestamp. Classify by local day.
+  function dueDayStr(due) {
     if (!due) return "";
+    const d = new Date(due);
+    if (isNaN(d)) return "";
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+  function dueState(due) {
+    const ds = dueDayStr(due);
+    if (!ds) return "";
     const t = todayStr();
-    return due < t ? "overdue" : due === t ? "today" : "future";
+    return ds < t ? "overdue" : ds === t ? "today" : "future";
+  }
+  function dueHasTime(due) {
+    const d = new Date(due);
+    return !isNaN(d) && !(d.getHours() === 0 && d.getMinutes() === 0);
   }
   function formatDue(due) {
     if (!due) return "";
-    return new Date(due + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    const d = new Date(due);
+    if (isNaN(d)) return "";
+    const date = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    return dueHasTime(due) ? `${date} ${d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}` : date;
+  }
+  // Convert a stored due value <-> the <input type="datetime-local"> string.
+  function toInputDateTime(due) {
+    if (!due) return "";
+    const d = new Date(due);
+    if (isNaN(d)) return "";
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}T${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  }
+  function fromInputDateTime(val) {
+    if (!val) return "";
+    const d = new Date(val);
+    return isNaN(d) ? "" : d.toISOString();
   }
 
   // ============================================================
@@ -486,6 +522,7 @@
   // ============================================================
   function visibleTasks() {
     return tasks.filter((t) => {
+      if (scope === "mine" && t.assigneeId !== (me && me.id)) return false;
       if (scope === "today" && dueState(t.due) !== "today") return false;
       if (scope === "overdue" && dueState(t.due) !== "overdue") return false;
       if (scope === "attention" && !t.needsAttention) return false;
@@ -565,14 +602,15 @@
   }
 
   function updateCounts() {
-    let today = 0, overdue = 0, attention = 0, completed = 0;
+    let today = 0, overdue = 0, attention = 0, completed = 0, mine = 0;
     tasks.forEach((t) => {
       const ds = dueState(t.due);
       if (ds === "today") today++; if (ds === "overdue") overdue++;
       if (t.needsAttention) attention++;
       if (t.status === "completed") completed++;
+      if (t.assigneeId === (me && me.id)) mine++;
     });
-    setCount("all", tasks.length); setCount("today", today);
+    setCount("all", tasks.length); setCount("today", today); setCount("mine", mine);
     setCount("overdue", overdue); setCount("attention", attention); setCount("completed", completed);
     const badge = $("mAttnBadge");
     if (badge) { badge.textContent = attention; badge.hidden = attention === 0; }
@@ -586,6 +624,12 @@
 
   const requestChip = (t) => t.source === "request" ? `<span class="chip request-chip">📨 ${esc(requesterLabel(t))}</span>` : "";
   const attentionChip = (t) => t.needsAttention ? `<span class="chip attention-chip">⚠ Needs attention</span>` : "";
+  function assigneeChip(t) {
+    if (!t.assigneeId) return "";
+    const p = profilesById[t.assigneeId];
+    const name = p ? (p.name || p.email || "User") : "User";
+    return `<span class="chip assignee-chip" title="Assigned to ${esc(name)}">👤 ${esc(name)}</span>`;
+  }
 
   function cardMarkup(t) {
     const ds = dueState(t.due);
@@ -596,7 +640,7 @@
       <div class="card prio-${t.priority} ${t.status === "completed" ? "done" : ""} ${t.needsAttention ? "flagged" : ""}" ${drag} data-id="${t.id}">
         <div class="card-title">${esc(t.title)}</div>
         ${notes}
-        <div class="card-meta">${attentionChip(t)}${requestChip(t)}${projectChip(t)}<span class="chip prio ${t.priority}">${t.priority}</span>${dueChip}</div>
+        <div class="card-meta">${attentionChip(t)}${assigneeChip(t)}${requestChip(t)}${projectChip(t)}<span class="chip prio ${t.priority}">${t.priority}</span>${dueChip}</div>
       </div>`;
   }
 
@@ -630,7 +674,7 @@
               <div class="list-title">${esc(t.title)}</div>
               ${t.notes ? `<div class="list-sub">${esc(t.notes)}</div>` : ""}
             </div>
-            <div class="list-meta">${attentionChip(t)}${requestChip(t)}${projectChip(t)}<span class="chip prio ${t.priority}">${t.priority}</span>${dueChip}</div>
+            <div class="list-meta">${attentionChip(t)}${assigneeChip(t)}${requestChip(t)}${projectChip(t)}<span class="chip prio ${t.priority}">${t.priority}</span>${dueChip}</div>
             ${t.status === "completed" && can.edit() ? `<button class="ghost-btn restore-btn" data-restore="${t.id}" title="Bring this task back">↩ Restore</button>` : ""}
           </div>`;
       }).join("");
@@ -767,6 +811,18 @@
       `<option value="${p.id}" ${p.id === selectedId ? "selected" : ""}>${esc(p.name)}</option>`).join("");
   }
 
+  // Only people who can act on tasks can be assignees.
+  function fillAssigneeOptions(selectedId) {
+    const assignable = people.filter((p) => ["owner", "delegate", "editor"].includes(p.role));
+    const opts = [`<option value="">— Unassigned —</option>`].concat(
+      assignable.map((p) => {
+        const name = p.name || p.email || "User";
+        return `<option value="${p.userId}" ${p.userId === selectedId ? "selected" : ""}>${esc(name)}</option>`;
+      })
+    );
+    $("fAssignee").innerHTML = opts.join("");
+  }
+
   function openModal(id) {
     const t = id ? tasks.find((x) => x.id === id) : null;
     if (t && !can.edit()) return;   // read-only roles can't open the editor
@@ -776,14 +832,19 @@
     $("fTitle").value = t ? t.title : "";
     $("fNotes").value = t ? t.notes || "" : "";
     fillProjectOptions(t ? t.projectId : scoped);
+    fillAssigneeOptions(t ? t.assigneeId : "");
     $("fPriority").value = t ? t.priority : "medium";
     $("fStatus").value = t ? t.status : "pending";
-    $("fDue").value = t ? t.due || "" : "";
+    $("fDue").value = t ? toInputDateTime(t.due) : "";
     deleteBtn.hidden = !t || !can.delete();
+    // Attachments + activity only apply to an already-saved task.
+    const extra = $("taskExtra");
+    if (t) { extra.hidden = false; loadThread(t.id); loadAttachments(t.id); }
+    else { extra.hidden = true; }
     show(overlay);
     setTimeout(() => $("fTitle").focus(), 30);
   }
-  const closeModal = () => hide(overlay);
+  const closeModal = () => { hide(overlay); openTaskId = null; };
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -791,7 +852,8 @@
     const data = {
       title: $("fTitle").value.trim(), notes: $("fNotes").value.trim(),
       projectId: projectSelect.value, priority: $("fPriority").value,
-      status: $("fStatus").value, due: $("fDue").value,
+      status: $("fStatus").value, due: fromInputDateTime($("fDue").value),
+      assigneeId: $("fAssignee").value || "",
     };
     if (!data.title) return;
     closeModal();
@@ -811,6 +873,100 @@
   $("closeModal").addEventListener("click", closeModal);
   $("cancelTask").addEventListener("click", closeModal);
   overlay.addEventListener("click", (e) => { if (e.target === overlay) closeModal(); });
+
+  // ============================================================
+  //  Task activity thread + attachments (edit modal)
+  // ============================================================
+  let openTaskId = null;
+
+  function eventAuthor(ev) {
+    if (!ev.user_id) return "Requester";
+    const p = profilesById[ev.user_id];
+    return p ? (p.name || p.email || "Staff") : "Staff";
+  }
+  function eventLine(ev) {
+    const when = new Date(ev.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    if (ev.type === "nudge")
+      return `<div class="thread-item sys"><span class="thread-meta">🔔 Reminder sent · ${esc(when)}</span></div>`;
+    if (ev.type === "status_change")
+      return `<div class="thread-item sys"><span class="thread-meta">${esc(ev.message || "Status changed")} · ${esc(when)}</span></div>`;
+    return `<div class="thread-item"><div class="thread-head"><span class="thread-author">${esc(eventAuthor(ev))}</span><span class="thread-meta">${esc(when)}</span></div><div class="thread-msg">${esc(ev.message || "")}</div></div>`;
+  }
+  async function loadThread(taskId) {
+    openTaskId = taskId;
+    const box = $("threadList");
+    box.innerHTML = `<div class="thread-empty">Loading…</div>`;
+    try {
+      const { data, error } = await sb.from("task_events").select("*").eq("task_id", taskId).order("created_at", { ascending: true });
+      if (error) throw error;
+      if (openTaskId !== taskId) return;   // modal moved on
+      renderThread(data || []);
+    } catch (e) { box.innerHTML = `<div class="thread-empty">Couldn't load activity.</div>`; }
+  }
+  function renderThread(events) {
+    const box = $("threadList");
+    if (!events.length) { box.innerHTML = `<div class="thread-empty">No activity yet.</div>`; return; }
+    box.innerHTML = events.map(eventLine).join("");
+    box.scrollTop = box.scrollHeight;
+  }
+  async function sendComment() {
+    const input = $("threadInput"); const body = input.value.trim();
+    if (!body || !openTaskId) return;
+    input.value = "";
+    const { error } = await sb.from("task_events").insert({ task_id: openTaskId, user_id: me.id, type: "comment", message: body });
+    if (error) { toast(error.message || "Couldn't post comment"); input.value = body; return; }
+    loadThread(openTaskId);
+  }
+  $("threadSend").addEventListener("click", sendComment);
+  $("threadInput").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); sendComment(); } });
+
+  async function loadAttachments(taskId) {
+    const box = $("attList");
+    box.innerHTML = `<div class="thread-empty">Loading…</div>`;
+    try {
+      const { data, error } = await sb.from("task_attachments").select("*").eq("task_id", taskId).order("created_at", { ascending: true });
+      if (error) throw error;
+      renderAttachments(data || []);
+    } catch (e) { box.innerHTML = `<div class="thread-empty">Couldn't load files.</div>`; }
+  }
+  function renderAttachments(list) {
+    const box = $("attList");
+    if (!list.length) { box.innerHTML = `<div class="thread-empty">No files yet.</div>`; return; }
+    box.innerHTML = list.map((a) =>
+      `<button type="button" class="att-item" data-path="${esc(a.path)}" data-name="${esc(a.filename)}">📄 <span class="att-name">${esc(a.filename)}</span><span class="att-size">${esc(fmtSize(a.size))}</span></button>`).join("");
+    box.querySelectorAll(".att-item").forEach((b) => b.addEventListener("click", () => downloadAttachment(b.dataset.path)));
+  }
+  function fmtSize(n) {
+    if (!n) return "";
+    const kb = n / 1024;
+    return kb < 1024 ? `${Math.max(1, Math.round(kb))} KB` : `${(kb / 1024).toFixed(1)} MB`;
+  }
+  async function downloadAttachment(path) {
+    try {
+      const { data, error } = await sb.storage.from("attachments").createSignedUrl(path, 120);
+      if (error || !data) { toast("Couldn't open file"); return; }
+      window.open(data.signedUrl, "_blank", "noopener");
+    } catch (e) { toast("Couldn't open file"); }
+  }
+  $("attInput").addEventListener("change", async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file || !openTaskId) return;
+    if (file.size > 10 * 1024 * 1024) { toast("File too large (max 10 MB)"); return; }
+    toast("Uploading…");
+    const safe = file.name.replace(/[^\w.\-]+/g, "_");
+    const path = `${openTaskId}/${Date.now()}-${safe}`;
+    const { error: upErr } = await sb.storage.from("attachments").upload(path, file, {
+      contentType: file.type || "application/octet-stream", upsert: false,
+    });
+    if (upErr) { toast(upErr.message || "Upload failed"); return; }
+    const { error } = await sb.from("task_attachments").insert({
+      task_id: openTaskId, path, filename: file.name, content_type: file.type, size: file.size, uploaded_by: me.id,
+    });
+    if (error) { toast(error.message || "Saved file but couldn't record it"); return; }
+    toast("File added");
+    loadAttachments(openTaskId);
+  });
 
   // ============================================================
   //  Project modal
@@ -1169,7 +1325,7 @@
     const title = $("rTitle").value.trim();
     if (!title) return;
     const row = {
-      title, notes: $("rNotes").value.trim(), due: $("rDue").value || null,
+      title, notes: $("rNotes").value.trim(), due: fromInputDateTime($("rDue").value) || null,
       priority: $("rPriority").value, status: "pending", source: "request",
       requester_id: me.id, created_by: me.id, project_id: null,
     };
