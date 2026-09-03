@@ -15,5 +15,5 @@ window.TASKTRACK_SUPABASE = {
   anonKey: "sb_publishable_rVEKBp2pZbIkhjo_we5biA_ud69_tGQ",
   // Web Push public (VAPID) key — safe for the browser. The matching private
   // key is a server secret and is NOT stored here (see docs/NOTIFICATIONS.md).
-  vapidPublicKey: "BFJEg7wztsglrguDHyDUE_l9eO6pwvzRkNd34Mai_vkBDnzc-bX1NmMgS4PmsT6-ZUiy0cSX5HIVMNXvPsDO2MM",
+  vapidPublicKey: "BEyATvrAyIY905_sM5MT-Ae3sukfunekSVAQyX5-SHfLEq7DnGhzaSQ-EtjO0bs37K7umy5u5wvFqEv9eIaS2h8",
 };
