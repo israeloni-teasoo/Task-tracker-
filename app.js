@@ -1509,7 +1509,7 @@
 
   function setupNotifications() {
     reflectNotifState();
-    if (!notifSupported() || !can.edit()) return;
+    if (!notifSupported() || !can.staff()) return;
     if (Notification.permission === "granted") { ensureSubscribed(); return; }
     // On by default: ask once automatically the first time a staff member enters
     // (harmless if the browser requires a gesture — the Settings toggle remains).
@@ -1535,7 +1535,7 @@
 
   // Keep the Settings row + mobile button in sync with the browser's state.
   function reflectNotifState() {
-    const supported = notifSupported() && can.edit();
+    const supported = notifSupported() && can.staff();
     const perm = ("Notification" in window) ? Notification.permission : "unsupported";
     const status = $("notifStatus"), btn = $("notifBtn"), mBtn = $("mNotifBtn");
     if (status) {

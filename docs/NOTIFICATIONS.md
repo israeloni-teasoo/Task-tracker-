@@ -83,11 +83,40 @@ missing key can never stop a reminder from being recorded; it just won't buzz.
 > trigger from an older version of this doc, the migration drops it for you so
 > reminders don't fire twice.
 
+## 4. Who gets pushed, and emailing the boss
+
+Migration `014_notify_recipients_email` wires notifications to the right people
+(it reuses the same `send-push` function + `app_settings` config as above):
+
+- **New office request** → the boss (+ delegates) get a push, **and the Owner
+  gets an email**. If the requester picked specific staff under "Who is this
+  for?", those people get a push too.
+- **A task is assigned to someone** → that person gets a push.
+- **A reminder ("Send Reminder")** → pushes the boss/delegates **and** anyone the
+  request is assigned to or was directed to.
+
+Everything here is best-effort and exception-guarded, so a notification problem
+can never block the underlying action.
+
+### Turning on the boss's email
+The email uses **Resend** (free tier: 100/day). One-time:
+
+1. Create an account at resend.com, verify your sending domain (or use their
+   test `onboarding@resend.dev` while trying it out), and copy an **API key**.
+2. Add secrets to the `send-push` function:
+   ```bash
+   supabase secrets set RESEND_API_KEY=re_xxx EMAIL_FROM="TaskTrack <no-reply@teasooconsulting.com>"
+   ```
+   (Or set them under Edge Functions → your function → Secrets in the dashboard.)
+3. Redeploy `send-push` (it now also sends email): `supabase functions deploy send-push --no-verify-jwt`.
+
+If `RESEND_API_KEY` isn't set, email is simply skipped — push still works.
+
 ### Notes
 
 - **iOS:** push only works when the app has been **added to the Home Screen**
   (installed as a PWA) on iOS 16.4+. On Android/Samsung it works installed or in
   the browser. The in-app flag (layers 1–2) works everywhere regardless.
-- To also push the daily reminders, call the same function from
-  `flag_stale_tasks()` for each newly-flagged task, or add a second scheduled
-  job that posts a summary. The nudge path above is the common case.
+- Recipients/assignees only get a **push** if they've enabled notifications on a
+  device (Settings → Device notifications). They always see it in-app under
+  **My tasks**.
