@@ -116,9 +116,26 @@ open to everyone (and it needs no account at all). Two things make this true:
 Reliable invite emails depend on SMTP being configured (above) — otherwise
 you'll hit the built-in email rate limit.
 
-## Password resets
+## Creating a password (mandatory on first entry)
 
-If someone forgets their password, they can use the **Email link** tab to sign
-in, then set a new password via **🔑 Set a password**. (A dedicated "forgot
-password" email flow can be added later; it also relies on email, so configure
-SMTP first.)
+The main app is invitation-only, so everyone signs in with a password. The
+first time an invited person opens their link, the app **requires them to create
+a password** before it lets them in — this way they can always sign back in on
+any device without waiting for another email. Once a password is set the app
+**never shows that screen again**, on mobile or in the browser (the "already set"
+flag lives on the account, so it follows them across every device).
+
+To change a password later, use **🔑 Change password** in the app.
+
+## Forgot / reset password
+
+The sign-in screen has a **"Forgot password?"** link (on the Password tab):
+
+1. The person types their invited email and taps **Forgot password?**.
+2. The app emails them a **reset link** (`resetPasswordForEmail`).
+3. Opening that link brings them straight to a **"Choose a new password"** screen;
+   after they save it, they're signed in.
+
+Like all email features, reliable reset emails depend on **SMTP being configured**
+(above) — otherwise you'll hit the built-in email rate limit. Make sure the app
+URL is listed under Auth → **URL Configuration → Redirect URLs**.

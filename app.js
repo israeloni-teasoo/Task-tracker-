@@ -70,24 +70,31 @@
   // ============================================================
   //  Boot & auth
   // ============================================================
+  let recoveryMode = false;   // true while handling a password-reset link
+
   async function boot() {
     if (!sb) { fatal("Cloud config missing. Check supabase-config.js and vendor/supabase.js."); return; }
-    let session = null;
-    try { session = (await sb.auth.getSession()).data.session; } catch (e) { /* offline */ }
-    if (session) await enterApp(session);
-    else showAuth();
 
+    // A password-reset link fires PASSWORD_RECOVERY — show the reset form, not the app.
     sb.auth.onAuthStateChange((event, sess) => {
-      if (event === "SIGNED_IN" && sess) enterApp(sess);
+      if (event === "PASSWORD_RECOVERY") { recoveryMode = true; me = sess ? sess.user : me; showPwSetup(true); }
+      else if (event === "SIGNED_IN" && sess) { if (!recoveryMode) enterApp(sess); }
       else if (event === "SIGNED_OUT") location.reload();
     });
+
+    let session = null;
+    try { session = (await sb.auth.getSession()).data.session; } catch (e) { /* offline */ }
+    // If the URL carries a recovery link, let onAuthStateChange handle it.
+    if (/type=recovery/.test(location.hash) || /type=recovery/.test(location.search)) return;
+    if (session) await enterApp(session);
+    else showAuth();
   }
 
-  function show(el) { el.hidden = false; }
-  function hide(el) { el.hidden = true; }
+  function show(el) { if (el) el.hidden = false; }
+  function hide(el) { if (el) el.hidden = true; }
 
   function showAuth() {
-    hide(bootEl); hide(appEl); show(authScreen);
+    hide(bootEl); hide(appEl); hide($("pwSetupScreen")); show(authScreen);
     $("authEmail").focus();
   }
 
@@ -97,35 +104,97 @@
       `<div class="toast" style="background:#ef4444;color:#fff">${esc(msg)}</div>`);
   }
 
+  // Has this user already chosen a password? Stored in user_metadata so it
+  // persists across every device — once set, we never prompt again.
+  function hasPassword() {
+    const md = (me && me.user_metadata) || {};
+    return md.password_set === true;
+  }
+
   async function enterApp(session) {
     if (appReady) return;         // guard against duplicate SIGNED_IN events
-    appReady = true;
     me = session.user;
     hide(authScreen); hide(bootEl);
     await loadRole();
+
+    // Invited users must create a password on first entry (so they're never
+    // locked out next time). After it's set, this screen never shows again.
+    if (!hasPassword()) { showPwSetup(false); return; }
+
+    continueIntoApp();
+  }
+
+  function continueIntoApp() {
+    if (appReady) return;
+    appReady = true;
+    hide($("pwSetupScreen"));
 
     if (myRole === "requester") {
       // Office staff: the simplified request portal.
       show($("portalScreen"));
       $("portalEmail").textContent = me.email || "";
-      await loadTasks();          // returns only their own requests (RLS)
-      subscribeRealtime();
-      renderRequests();
+      loadTasks().then(() => { subscribeRealtime(); renderRequests(); });   // RLS: only their own
       return;
     }
 
     // Boss / delegate / editor / viewer: the full app.
     show(appEl);
     renderAccount();
-    await Promise.all([loadProjects(), loadTasks(), loadPeople()]);
-    primeSeen();               // seed before realtime so existing requests don't toast
-    saveCache();
-    subscribeRealtime();
-    render();
-    setupNotifications();
-    maybeOfferLocalUpload();
-    maybePromptPassword();
+    Promise.all([loadProjects(), loadTasks(), loadPeople()]).then(() => {
+      primeSeen();             // seed before realtime so existing requests don't toast
+      primeFlagged();          // seed so existing reminders don't chime
+      saveCache();
+      subscribeRealtime();
+      render();
+      setupNotifications();
+      maybeOfferLocalUpload();
+    });
   }
+
+  // ---- Mandatory / reset password screen ----
+  function pwSetupMsg(text, ok) {
+    const m = $("pwSetupMsg");
+    m.hidden = false;
+    m.className = "auth-msg " + (ok ? "ok" : "err");
+    m.textContent = text;
+  }
+
+  function showPwSetup(isRecovery) {
+    hide(bootEl); hide(authScreen); hide(appEl); hide($("portalScreen"));
+    $("pwSetupTitle").textContent = isRecovery ? "Choose a new password" : "Create your password";
+    $("pwSetupSub").textContent = isRecovery
+      ? "Enter a new password for your account."
+      : "Set a password so you can sign back in anytime — on any device.";
+    $("pwSetupSubmit").textContent = isRecovery ? "Save new password" : "Save password & continue";
+    $("pwSetupMsg").hidden = true;
+    $("pwNew").value = ""; $("pwNew2").value = "";
+    show($("pwSetupScreen"));
+    setTimeout(() => $("pwNew").focus(), 50);
+  }
+
+  $("pwSetupForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const pw = $("pwNew").value, pw2 = $("pwNew2").value;
+    if (pw.length < 6) { pwSetupMsg("Password must be at least 6 characters.", false); return; }
+    if (pw !== pw2) { pwSetupMsg("The two passwords don't match.", false); return; }
+    const btn = $("pwSetupSubmit"); const label = btn.textContent;
+    btn.disabled = true; btn.textContent = "Saving…";
+    const { error } = await sb.auth.updateUser({ password: pw, data: { password_set: true } });
+    btn.disabled = false; btn.textContent = label;
+    if (error) { pwSetupMsg(friendlyAuthError(error), false); return; }
+    // Refresh the local user so hasPassword() is true from here on.
+    try { me = (await sb.auth.getUser()).data.user || me; } catch (_) {}
+    if (recoveryMode) {
+      recoveryMode = false;
+      // Clean the recovery token out of the URL, then enter normally.
+      try { history.replaceState(null, "", location.pathname); } catch (_) {}
+      const { data } = await sb.auth.getSession();
+      appReady = false;
+      if (data.session) { await loadRole(); continueIntoApp(); } else showAuth();
+    } else {
+      continueIntoApp();
+    }
+  });
 
   // ---- Login form ----
   let authMode = "password";   // "password" | "link"
@@ -137,6 +206,7 @@
       authMode = tab.dataset.mode;
       const pw = authMode === "password";
       $("passwordField").hidden = !pw;
+      $("forgotPw").hidden = !pw;
       $("authSubmit").textContent = pw ? "Sign in" : "Send me a login link";
       $("authHint").textContent = pw
         ? "Access is by invitation. Sign in with the email you were invited on."
@@ -152,6 +222,23 @@
     m.textContent = text;
   }
 
+  // Turn Supabase's raw auth errors into plain, friendly guidance.
+  function friendlyAuthError(error) {
+    const msg = (error && error.message) || "";
+    const low = msg.toLowerCase();
+    if (low.includes("invalid login") || low.includes("invalid credentials"))
+      return "That email or password isn't right. If you've never set a password, use “Forgot password?” to create one.";
+    if (low.includes("not allowed") || low.includes("signups not allowed") || low.includes("signup is disabled"))
+      return "Access to the app is by invitation only. Ask the Owner to invite your email — meanwhile the office request page is open to everyone.";
+    if (low.includes("email not confirmed"))
+      return "Please open the invitation link we emailed you first, then set your password.";
+    if (low.includes("rate limit"))
+      return "Too many emails for now — please wait about an hour, or sign in with your password.";
+    if (low.includes("user not found"))
+      return "We couldn't find an account for that email. Ask the Owner to invite you.";
+    return msg || "Something went wrong. Please try again.";
+  }
+
   $("authForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const email = $("authEmail").value.trim();
@@ -160,48 +247,47 @@
 
     if (authMode === "password") {
       const password = $("authPassword").value;
-      if (!password) { authMsg("Enter your password, or use the Email link tab.", false); return; }
+      if (!password) { authMsg("Enter your password, or use “Forgot password?” to create one.", false); return; }
       btn.disabled = true; btn.textContent = "Signing in…";
       const { error } = await sb.auth.signInWithPassword({ email, password });
       btn.disabled = false; btn.textContent = "Sign in";
-      if (error) authMsg(error.message + " — no password yet? Use the Email link tab, then set one in the app.", false);
+      if (error) authMsg(friendlyAuthError(error), false);
       // success -> onAuthStateChange handles entering the app
     } else {
       btn.disabled = true; btn.textContent = "Sending…";
-      const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.href.split("#")[0] } });
+      const { error } = await sb.auth.signInWithOtp({
+        email,
+        options: { shouldCreateUser: false, emailRedirectTo: location.href.split("#")[0] },
+      });
       btn.disabled = false; btn.textContent = "Send me a login link";
-      if (error) authMsg(error.message, false);
+      if (error) authMsg(friendlyAuthError(error), false);
       else authMsg(`Check ${email} for your login link.`, true);
     }
   });
 
+  // ---- Forgot password: email a reset link ----
+  $("forgotPw").addEventListener("click", async () => {
+    const email = $("authEmail").value.trim();
+    if (!email) { authMsg("Enter your email above first, then tap “Forgot password?”.", false); $("authEmail").focus(); return; }
+    const btn = $("forgotPw"); btn.disabled = true;
+    const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.href.split("#")[0] });
+    btn.disabled = false;
+    if (error) authMsg(friendlyAuthError(error), false);
+    else authMsg(`We've emailed ${email} a link to reset your password.`, true);
+  });
+
   $("signOutBtn").addEventListener("click", async () => { await sb.auth.signOut(); });
 
+  // Change password from inside the app (already signed in).
   async function setPassword() {
-    const pw = prompt("Set a password for faster sign-in on your other devices (at least 6 characters):");
+    const pw = prompt("Enter a new password (at least 6 characters):");
     if (pw == null) return;
     if (pw.length < 6) { toast("Password must be at least 6 characters"); return; }
-    const { error } = await sb.auth.updateUser({ password: pw });
-    if (!error) { try { localStorage.setItem("tasktrack.pwPrompted", "1"); } catch (e) {} }
-    toast(error ? (error.message || "Could not set password") : "Password set — use it to sign in on any device");
+    const { error } = await sb.auth.updateUser({ password: pw, data: { password_set: true } });
+    if (!error) { try { me = (await sb.auth.getUser()).data.user || me; } catch (_) {} }
+    toast(error ? (friendlyAuthError(error) || "Could not set password") : "Password updated — use it to sign in on any device");
   }
   $("setPwBtn").addEventListener("click", setPassword);
-
-  // One-time nudge: encourage setting a password so other devices don't rely on
-  // the (rate-limited) email link.
-  function maybePromptPassword() {
-    try { if (localStorage.getItem("tasktrack.pwPrompted")) return; } catch (e) { return; }
-    if (!$("uploadOverlay").hidden) return;   // don't stack over the upload prompt
-    show($("pwPromptOverlay"));
-  }
-  $("pwPromptLater").addEventListener("click", () => {
-    hide($("pwPromptOverlay"));
-    try { localStorage.setItem("tasktrack.pwPrompted", "1"); } catch (e) {}
-  });
-  $("pwPromptSet").addEventListener("click", async () => {
-    hide($("pwPromptOverlay"));
-    await setPassword();
-  });
 
   function renderAccount() {
     if (!me) return;
@@ -292,6 +378,61 @@
     toast(fresh.length === 1 ? `🔔 New request from ${requesterLabel(fresh[0])}` : `🔔 ${fresh.length} new requests`);
   }
 
+  // Reminders: play a chime when a task becomes freshly flagged for attention
+  // (someone tapped "Send Reminder" on /office). Only the boss/editors hear it.
+  let flaggedTaskIds = new Set();
+  function primeFlagged() {
+    flaggedTaskIds = new Set(tasks.filter((t) => t.needsAttention).map((t) => t.id));
+  }
+  function detectReminders() {
+    const now = new Set(tasks.filter((t) => t.needsAttention).map((t) => t.id));
+    let fresh = 0;
+    now.forEach((id) => { if (!flaggedTaskIds.has(id)) fresh++; });
+    flaggedTaskIds = now;
+    if (fresh > 0 && can.edit()) {
+      playChime();
+      toast(fresh === 1 ? "🔔 A reminder was sent for a task" : `🔔 ${fresh} reminders received`);
+    }
+  }
+
+  // ---- Reminder chime (Web Audio, no asset needed) ----
+  let audioCtx = null, audioUnlocked = false;
+  function unlockAudio() {
+    if (audioUnlocked) return;
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      audioCtx = audioCtx || new AC();
+      if (audioCtx.state === "suspended") audioCtx.resume();
+      audioUnlocked = true;
+    } catch (e) { /* ignore */ }
+  }
+  // Browsers require a user gesture before audio can play.
+  ["pointerdown", "keydown", "touchstart"].forEach((ev) =>
+    window.addEventListener(ev, unlockAudio, { once: false, passive: true }));
+
+  function playChime() {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      audioCtx = audioCtx || new AC();
+      if (audioCtx.state === "suspended") audioCtx.resume();
+      const ctx = audioCtx, now = ctx.currentTime;
+      // Two quick rising tones — a gentle "ding-dong".
+      [[880, 0], [1174.66, 0.18]].forEach(([freq, at]) => {
+        const osc = ctx.createOscillator(), gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.0001, now + at);
+        gain.gain.exponentialRampToValueAtTime(0.25, now + at + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + at + 0.35);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(now + at);
+        osc.stop(now + at + 0.4);
+      });
+    } catch (e) { /* audio not available */ }
+  }
+
   // ============================================================
   //  Realtime
   // ============================================================
@@ -320,7 +461,7 @@
     if (myRole === "requester") { renderRequests(); return; }
     saveCache();
     render();
-    if (kind === "task") detectNewRequests();
+    if (kind === "task") { detectNewRequests(); detectReminders(); }
   }
 
   // ============================================================

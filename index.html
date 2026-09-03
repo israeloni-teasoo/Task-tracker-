@@ -55,8 +55,34 @@
         </label>
         <button type="submit" class="primary-btn wide" id="authSubmit">Sign in</button>
       </form>
+      <button class="linklike" id="forgotPw" type="button">Forgot password?</button>
       <p class="auth-msg" id="authMsg" hidden></p>
       <p class="auth-hint" id="authHint">Access is by invitation. Sign in with the email you were invited on — you'll stay signed in on this device.</p>
+    </div>
+  </div>
+
+  <!-- Create / reset password (mandatory after an invite or reset link) -->
+  <div class="auth-screen" id="pwSetupScreen" hidden>
+    <div class="auth-card">
+      <div class="brand center">
+        <div class="brand-mark">✓</div>
+        <div class="brand-text">
+          <h1 id="pwSetupTitle">Create your password</h1>
+          <span id="pwSetupSub">Set a password so you can sign back in anytime.</span>
+        </div>
+      </div>
+      <form id="pwSetupForm" class="auth-form">
+        <label class="field">
+          <span>New password</span>
+          <input type="password" id="pwNew" required minlength="6" placeholder="At least 6 characters" autocomplete="new-password" />
+        </label>
+        <label class="field">
+          <span>Confirm password</span>
+          <input type="password" id="pwNew2" required minlength="6" placeholder="Re-enter it" autocomplete="new-password" />
+        </label>
+        <button type="submit" class="primary-btn wide" id="pwSetupSubmit">Save password &amp; continue</button>
+      </form>
+      <p class="auth-msg" id="pwSetupMsg" hidden></p>
     </div>
   </div>
 
@@ -156,7 +182,7 @@
       </nav>
 
       <div class="sidebar-footer">
-        <button class="ghost-btn notif-btn" id="setPwBtn" title="Set or change your password for faster sign-in">🔑 Set a password</button>
+        <button class="ghost-btn notif-btn" id="setPwBtn" title="Change your password">🔑 Change password</button>
         <button class="ghost-btn notif-btn" id="notifBtn" hidden title="Get notified on this device">🔔 Enable notifications</button>
         <div class="account" id="account" hidden>
           <div class="account-avatar" id="accountAvatar">?</div>
@@ -366,21 +392,6 @@
         <button class="ghost-btn" id="mExportBtn">⬇ Export</button>
         <button class="ghost-btn" id="mImportBtn">⬆ Import</button>
         <button class="ghost-btn danger-btn" id="mSignOutBtn">⎋ Sign out</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- One-time nudge to set a password (avoids relying on the email link) -->
-  <div class="modal-overlay" id="pwPromptOverlay" hidden>
-    <div class="modal modal-sm" role="dialog" aria-modal="true">
-      <div class="modal-head"><h3>Set a password?</h3></div>
-      <div class="modal-body">
-        <p class="upload-text">Set a password so you can sign in on your phone and other devices instantly — no waiting for an email link.</p>
-        <div class="modal-foot">
-          <div class="spacer"></div>
-          <button type="button" class="ghost-btn" id="pwPromptLater">Maybe later</button>
-          <button type="button" class="primary-btn" id="pwPromptSet">Set a password</button>
-        </div>
       </div>
     </div>
   </div>
