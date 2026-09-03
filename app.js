@@ -196,6 +196,9 @@
     }
   });
 
+  // Escape hatch from the mandatory password screen (wrong account, etc.).
+  $("pwSetupSignOut").addEventListener("click", async () => { await sb.auth.signOut(); });
+
   // ---- Login form ----
   let authMode = "password";   // "password" | "link"
 
