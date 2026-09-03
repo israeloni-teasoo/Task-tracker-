@@ -139,8 +139,8 @@
       $("passwordField").hidden = !pw;
       $("authSubmit").textContent = pw ? "Sign in" : "Send me a login link";
       $("authHint").textContent = pw
-        ? "Signing in keeps you logged in on this device — you won't need to do this every time."
-        : "We'll email you a one-time link. First time here? Use this, then set a password in the app.";
+        ? "Access is by invitation. Sign in with the email you were invited on."
+        : "We'll email a one-time link to your invited address. New here? Ask the Owner for an invite.";
       $("authMsg").hidden = true;
     });
   });
@@ -943,14 +943,16 @@
       $("inviteEmail").value = "";
       return;
     }
-    const { error } = await sb.from("role_invites")
-      .upsert({ email, role, invited_by: me.id }, { onConflict: "email" });
-    if (error) { toast(error.message || "Could not add invite"); return; }
+    // Send an actual invitation email (creates the account + emails a sign-in
+    // link) via the invite-user function; the app is invitation-only so this is
+    // the only way into the main app.
+    const { data, error } = await sb.functions.invoke("invite-user", { body: { email, role } });
+    if (error) { toast("Could not send the invite — check the email address and that you're the Owner."); return; }
     $("inviteEmail").value = "";
-    // optimistic update, then reconcile in the background
     invites = invites.filter((i) => i.email !== email).concat([{ email, role, created_at: new Date().toISOString() }]);
     renderInvites();
-    toast(`${email} will be ${ROLE_LABEL[role]} when they sign in`);
+    if (data && data.alreadyExists) toast(`${email} already has an account — role set to ${ROLE_LABEL[role]}. They can just sign in.`);
+    else toast(`Invitation emailed to ${email} (${ROLE_LABEL[role]})`);
     loadInvites();
   });
 

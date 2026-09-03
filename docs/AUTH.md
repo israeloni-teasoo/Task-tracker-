@@ -84,6 +84,38 @@ you'll need. For very high volume or sending as many different addresses, use
 the **SMTP relay service** instead (Admin console → Gmail → Routing → SMTP relay;
 host `smtp-relay.gmail.com`, port 587).
 
+## Invitation-only main app
+
+The main app is **invitation-only**; only the public `/office` request page is
+open to everyone (and it needs no account at all). Two things make this true:
+
+1. **Turn off open sign-up.** Supabase → **Authentication → Sign In / Providers →
+   Email** → disable **"Allow new users to sign up"** (a.k.a. "Enable signups").
+   With this off, a stranger with the app URL cannot create an account.
+2. **Deploy the `invite-user` Edge Function** so the Owner can invite people
+   (it uses the service role, which can create accounts even with sign-up off):
+   - **No-Docker / no-CLI option:** Supabase dashboard → **Edge Functions → Create
+     a function** → name it `invite-user`, paste the code from
+     `backend/functions/invite-user/index.ts`, and Deploy.
+   - **CLI option (no Docker needed):** `supabase functions deploy invite-user`.
+   - Optionally set the secret **APP_URL** to `https://mp-office.teasooconsulting.com`
+     (Edge Functions → Secrets) so the invite link points at the app; it defaults
+     to that anyway. `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are provided
+     automatically.
+   - Make sure the app URL is in Auth → **URL Configuration → Redirect URLs**
+     (already required for login).
+
+### How inviting works
+- The Owner opens **People & roles → Add by email → role → Add**.
+- That calls `invite-user`, which records the role and **emails the person an
+  invitation** with a sign-in link.
+- When they accept, the sign-up trigger applies the role you chose.
+- If the email already has an account, their role is just updated and they sign
+  in normally.
+
+Reliable invite emails depend on SMTP being configured (above) — otherwise
+you'll hit the built-in email rate limit.
+
 ## Password resets
 
 If someone forgets their password, they can use the **Email link** tab to sign
