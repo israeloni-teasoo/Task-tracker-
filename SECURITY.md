@@ -3,6 +3,12 @@
 _Last reviewed: 2026-09-02. Reviewer: security pass over the whole project, from
 an attacker's perspective and against OWASP Top 10 (2021) and STRIDE._
 
+> **Update (2026-09-03):** the public `/office` page was removed — the app is now
+> invitation-only and everyone signs in. References below to `/office`,
+> `request.html`, and anonymous request submission are historical; the anon
+> insert policy and `public_*` RPCs remain in the schema but are no longer
+> reachable from a shipped page. Roles now display "Admin" for the `owner` value.
+
 ## 1. What we're securing (scope & architecture)
 
 TaskTrack has **no custom application server**. That removes a whole class of

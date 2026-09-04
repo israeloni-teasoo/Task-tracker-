@@ -1,156 +1,89 @@
-# TaskTrack — a simple personal task & todo tracker
+# TaskTrack
 
-A lightweight, no-fuss task tracker for keeping on top of work **and** home
-todos. Built as an alternative to Trello/ClickUp for people who just want to
-jot tasks down, see what's due, and drag things across a board — without the
-learning curve.
+An internal task tracker + office-request system for a firm's Managing Partner,
+replacing Trello/ClickUp. A Kanban board and list for the leadership team, and a
+personal dashboard for everyone else — with cross-device sync, roles, reminders,
+and notifications. Vanilla HTML/CSS/JS (no framework, no build), installable as a
+PWA, backed by Supabase, hosted on Vercel.
 
-## Why this exists
+> Project context for contributors lives in [`CLAUDE.md`](CLAUDE.md) — keep it
+> current with every change.
 
-- **No accounts, no setup.** Open one file and start using it.
-- **Board view.** Drag tasks between **Pending → In Progress → Blocked → On Hold → Completed**.
-- **Work and personal in one place.** Tag every task as Work 💼 or Personal 🏠 and filter between them.
-- **Nothing to lose.** Data is saved in the browser, and you can Export a
-  backup file (or Import it on another computer) anytime.
+## Who sees what
 
-## How to use it
+- **Admin** (the developer) and the **Managing Partner** → the full app: Kanban
+  board + list of all tasks, projects, People & roles, Settings.
+- **Editor / Viewer / Requester** → a personal dashboard: tasks **assigned to
+  me**, a form to **request** something, and **my requests**.
 
-**Hosted on Vercel.** The repo is connected to Vercel, which deploys the site on
-every push to the production branch. Open the Vercel URL
-(`https://<your-project>.vercel.app/`) and sign in.
+Roles (DB `app_role`): `owner` (shown as **Admin**), `delegate` (the Managing
+Partner), `editor`, `viewer`, `requester`. See
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-> Set the Vercel **Production Branch** to `claude/internal-task-tracker-43ehtk`
-> (the repo's default branch), and add the Vercel URL to Supabase →
-> Authentication → **URL Configuration** (Site URL + Redirect URLs) so the login
-> link can return to the app.
+## Accounts & invites
 
-### Install it as an app (free — no App Store, no cost)
+The app is **invitation-only** — everyone signs in.
 
-It's a **PWA**, so it installs to the home screen and runs full-screen like a
-native app, on phones and computers:
+1. The Admin (or Managing Partner) opens **People & roles**, enters an email and
+   picks a role, and clicks **Add**.
+2. The person gets an **email magic link**; on first click they set their **name
+   and a password**. After that they sign in with email + password.
+3. New sign-ups default to **Requester** unless a role was chosen for them.
 
-- **iPhone / iPad (Safari):** open the link → tap **Share** ⬆️ → **Add to Home Screen**.
-- **Samsung / Android (Chrome):** open the link → menu **⋮** → **Add to Home screen** / **Install app**.
-- **Desktop (Chrome/Edge):** click the **install** icon in the address bar.
+Sign-ups must be **ON** in Supabase (Auth → Providers → Email) for invites to
+create accounts. For reliable invite/reset emails, configure SMTP — see
+[`docs/AUTH.md`](docs/AUTH.md). (There is no public `/office` page anymore.)
 
-After installing, it opens from its own icon and works offline for viewing.
+## Install as an app (PWA, free)
 
-### Everyday actions
+- **iPhone/iPad (Safari):** open the link → **Share** ⬆️ → **Add to Home Screen**.
+- **Android/Samsung (Chrome):** menu **⋮** → **Add to Home screen / Install app**.
+- **Desktop (Chrome/Edge):** the **install** icon in the address bar.
 
-| Do this | How |
-| --- | --- |
-| Add a task | **＋ New task** (top right) |
-| Edit a task | Click the task card / row |
-| Move a task's status | **Drag** the card between board columns |
-| Mark done quickly | Tick the checkbox in **List** view |
-| Switch layout | **▦ Board** / **☰ List** toggle |
-| Focus on work or home | Sidebar filters (All / Work / Personal / Due today / Overdue) |
-| Find a task | Search box (top right) |
-| Back up / move devices | **⬇ Export** and **⬆ Import** in the sidebar |
+## Features
 
-## Views
+- Tasks with title, notes, project, priority, status, **due date + time**,
+  **multiple assignees**, attachments, and a per-task **comment/activity thread**.
+- Requests: staff submit requests and choose **who they're for** (with the option
+  to copy the Admin); reminders with a 30-minute cooldown.
+- Notifications: in-app flag + toast + chime; **Web Push** to phones; **email to
+  the boss** on new requests. See [`docs/NOTIFICATIONS.md`](docs/NOTIFICATIONS.md).
+- Real-time sync, light/dark theme, offline cache, and backup export/import
+  (in **Settings**).
 
-- **Board** — a Kanban layout. Each column is a status; drag cards to update.
-- **List** — a compact, grouped checklist with quick-complete checkboxes.
+## Backend setup (one-time)
 
-## Accounts & sync
+1. Apply [`backend/schema.sql`](backend/schema.sql) (fresh project) **or** run the
+   **Apply DB migrations** GitHub Action to apply `supabase/migrations/*` in order.
+2. Auth: enable sign-ups, add the app URL to **Redirect URLs**, configure SMTP.
+3. Notifications (optional): deploy the `send-push` Edge Function, set its
+   secrets, and insert the two `app_settings` rows — full steps in
+   [`docs/NOTIFICATIONS.md`](docs/NOTIFICATIONS.md).
 
-Sign in once per device and you **stay signed in** — the session persists, so
-you won't be asked every time. Two ways to sign in:
+## Hosting (Vercel)
 
-- **Password** (default) — instant, no waiting for email.
-- **Email link** — a one-time magic link; good for the first sign-in on a new
-  device. After using it once, click **🔑 Set a password** in the app so next
-  time is instant.
-
-Your tasks live in your account, synced across every device in real time — open
-the app on an iPhone, a Samsung and a laptop and a change on one shows on the
-others within seconds.
-
-Roles decide what each person can do (Owner, Delegate, Editor, Viewer,
-Requester) — see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). For email
-limits and connecting your own email sender, see [`docs/AUTH.md`](docs/AUTH.md).
-
-## Public office request link
-
-Share **`/office`** with the office — e.g.
-**`https://mp-office.teasooconsulting.com/office`**. Anyone can submit a request
-with their **name** and optional **department** — no account needed — and it
-appears on the boss's board tagged with who asked. Submitters can check the
-status of their own requests from the same device. (Backed by an insert-only
-anon policy; see `backend/migrations/006_public_requests.sql`.)
-
-`/office` is a Vercel rewrite to `request.html` (see `vercel.json`); the page
-also still works at `/request.html` directly.
-
-## Appearance
-
-A **light/dark toggle** sits at the bottom of the sidebar (and on the request
-page). It follows your device theme until you pick one, then remembers it.
-
-## Backend setup
-
-Run `backend/schema.sql` once, then the files in `backend/migrations/` in order
-if you applied the schema before those features existed.
-
-**Offline:** the installed app keeps a local cache so you can still see your
-tasks without a connection; edits save once you're back online.
-
-**Backup:** **Export** downloads a JSON copy anytime; **Import** uploads tasks
-from a backup into your account.
+The repo is connected to Vercel (static site, no build). Set the **Production
+Branch** to `claude/internal-task-tracker-43ehtk`, then add the deployment URL to
+Supabase → Authentication → **URL Configuration** (Site URL + Redirect URLs).
+Every push to the production branch redeploys automatically. Bump `sw.js`'s
+`CACHE` on every front-end change so clients update.
 
 ## Project structure
 
 ```
-index.html            — markup / layout
+index.html            — markup / layout (login, dashboard, full app, modals)
 styles.css            — styling (light + dark, responsive)
-app.js                — all behaviour (auth, cloud sync, board, list, drag & drop)
-supabase-config.js    — Supabase URL + publishable key (safe for the browser)
-vendor/supabase.js    — Supabase client library (vendored for offline use)
-manifest.webmanifest  — PWA metadata (name, icons, colours)
+app.js                — all behaviour (auth, sync, board/list, dashboard, notifications)
+supabase-config.js    — Supabase URL + publishable key + VAPID public key
+vendor/supabase.js    — Supabase client library (vendored)
+manifest.webmanifest  — PWA metadata
 sw.js                 — service worker (offline support)
-icons/                — app icons
-backend/schema.sql    — database tables, roles & row-level security
-backend/migrations/   — incremental DB changes to apply on existing projects
-backend/functions/    — Supabase Edge Function for web push
-vercel.json           — Vercel static-hosting config
+backend/schema.sql    — full database schema, roles & row-level security
+supabase/migrations/  — timestamped migrations the Action applies
+backend/migrations/   — paste-style mirrors of each migration
+backend/functions/    — Supabase Edge Functions (send-push)
+vercel.json           — Vercel config + security headers (strict CSP)
+docs/                 — AUTH, NOTIFICATIONS, ARCHITECTURE
 ```
 
-No build step, no framework. Pushing to the production branch redeploys on
-Vercel automatically.
-
-## Hosting (Vercel)
-
-The repo is connected to **Vercel**, which serves the static site (no build
-command needed). To finish setup:
-
-1. In Vercel → Project → Settings → **Git**, set the **Production Branch** to
-   `claude/internal-task-tracker-43ehtk`.
-2. Copy the deployment URL (`https://<your-project>.vercel.app/`).
-3. In Supabase → Authentication → **URL Configuration**, set the **Site URL** to
-   that URL and add it under **Redirect URLs**, so magic-link logins return to
-   the app.
-
-Every push to the production branch then redeploys automatically.
-
-## Roles & permissions setup
-
-1. Apply `backend/schema.sql`, then the files in `backend/migrations/` in order.
-2. **You sign in first** → you become the **Owner** (for testing/development).
-3. Open **People & roles** → add the boss's email and set it to **Owner**. When
-   she signs in she becomes an Owner too — multiple Owners are supported, so you
-   keep full access. You can also change anyone's role there after they sign in.
-
-## Roadmap
-
-Implemented: logins, cross-device sync, roles & permissions, office request
-portal, in-app "needs attention" flags, auto-reminders, and (optional) web push.
-All on free infrastructure (Supabase + Vercel).
-
-- **Design & permission model:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-- **Database schema & security policies:** [`backend/schema.sql`](backend/schema.sql)
-
-## Ideas for later
-
-- Recurring tasks
-- Subtasks / checklists inside a task
+No build step, no framework.

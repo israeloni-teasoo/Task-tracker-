@@ -359,15 +359,18 @@ create policy profiles_select on public.profiles for select
 create policy profiles_update_own on public.profiles for update
   using (id = auth.uid()) with check (id = auth.uid());
 
--- memberships: see your own role; staff see all; only the owner changes roles.
+-- memberships: see your own role; staff see all. Admin (owner) changes any role;
+-- the Managing Partner (delegate) may manage everyone except Admins.
 create policy memberships_select on public.memberships for select
   using (user_id = auth.uid() or public.is_staff());
 create policy memberships_write on public.memberships for all
-  using (public.is_owner()) with check (public.is_owner());
+  using (public.is_owner() or (public.app_current_role() = 'delegate' and role <> 'owner'))
+  with check (public.is_owner() or (public.app_current_role() = 'delegate' and role <> 'owner'));
 
--- role_invites: only the Owner can view or manage pre-assigned roles.
-create policy role_invites_owner on public.role_invites for all
-  using (public.is_owner()) with check (public.is_owner());
+-- role_invites: Admin + Managing Partner manage invites; delegates can't grant Admin.
+create policy role_invites_manage on public.role_invites for all
+  using (public.is_owner() or public.app_current_role() = 'delegate')
+  with check (public.is_owner() or (public.app_current_role() = 'delegate' and role <> 'owner'));
 
 -- projects: any signed-in person may read; staff (editor+) manage them.
 create policy projects_select on public.projects for select

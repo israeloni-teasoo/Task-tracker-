@@ -24,10 +24,14 @@ project context._
 `owner`, `delegate`, `editor`, `viewer`, `requester`.
 - **`owner` is displayed as "Admin"** (display-only rename; the enum value is
   still `owner`). The developer is the Admin / super-admin who assigns everyone.
-- **The boss = a `delegate`** whose profile name is **"Managing Partner"** (set via
-  the invite's optional name field).
+- **The boss = a `delegate`** whose profile name is **"Managing Partner"** (she
+  sets this herself on the first-sign-in name+password screen).
 - First user to ever sign up becomes `owner` automatically.
 - Default role for a new sign-up with no invite = `requester`.
+- **People management** (invite / change role / remove) is available to `owner`
+  AND `delegate`, but a delegate can never touch an `owner` row or grant `owner`
+  (enforced in RLS, migration 016). Invites capture **email + role only** — the
+  person sets their own name on first sign-in.
 
 ### What each role sees (routing in `continueIntoApp`)
 - **owner + delegate → full app** (Kanban board + list of ALL tasks, projects,
@@ -39,7 +43,7 @@ project context._
 ## Auth & invites
 - **Invitation-only**, no public page. Sign-ups must be **ON** in Supabase
   (Auth → Providers → Email) so the Admin's invite can create accounts.
-- Invite flow (no Edge Function): Admin enters email + optional name + role in
+- Invite flow (no Edge Function): Admin/Managing Partner enters email + role in
   **People & roles** → app upserts `role_invites` → `signInWithOtp({shouldCreateUser:true})`
   emails a magic link. On first click the person MUST set **name + password**
   (`#pwSetupScreen`); `user_metadata.password_set` marks it done forever, on every
@@ -77,7 +81,7 @@ the schema but are unused/harmless.
   - 010 rate-limit public nudge · 011 wire push · 012 assignee/due/comments/
     attachments · 013 multi-assignee + recipients + `public_staff` · 014 push to
     recipients + boss email · 015 invite-name + email label + assignee/recipient
-    task visibility.
+    task visibility · 016 delegate can manage people (not Admins).
 - Notification config lives in the RLS-locked `public.app_settings`
   (`push_fn_url`, `push_webhook_secret`) — never in the repo.
 
@@ -101,4 +105,4 @@ the schema but are unused/harmless.
 - Keep `backend/schema.sql` and both migration folders in sync with every DB change.
 - Update this file whenever the architecture, roles, or setup change.
 
-_Last updated: 2026-09-03._
+_Last updated: 2026-09-04._

@@ -430,7 +430,7 @@
   }
 
   // Reminders: play a chime when a task becomes freshly flagged for attention
-  // (someone tapped "Send Reminder" on /office). Only the boss/editors hear it.
+  // (someone tapped "Send Reminder" on a request). Only the boss/editors hear it.
   let flaggedTaskIds = new Set();
   function primeFlagged() {
     flaggedTaskIds = new Set(tasks.filter((t) => t.needsAttention).map((t) => t.id));
@@ -593,15 +593,18 @@
   }
 
   // Hide create/edit affordances for read-only roles (viewer / requester).
+  // Admin (owner) and the Managing Partner (delegate) manage people.
+  const canManagePeople = () => ["owner", "delegate"].includes(myRole);
+
   function reflectPermissions() {
     const editor = can.edit();
     $("newTaskBtn").style.display = editor ? "" : "none";
     $("newProjectBtn").style.display = editor ? "" : "none";
-    $("peopleBtn").hidden = myRole !== "owner";
+    $("peopleBtn").hidden = !canManagePeople();
     // mobile equivalents
     $("mAddBtn").style.display = editor ? "" : "none";
     $("mNewProjectBtn").style.display = editor ? "" : "none";
-    $("mPeopleBtn").hidden = myRole !== "owner";
+    $("mPeopleBtn").hidden = !canManagePeople();
   }
 
   function renderSidebarProjects() {
@@ -1304,6 +1307,9 @@
   let invites = [];
 
   function openPeople() {
+    // Only an Admin can grant the Admin (owner) role — hide it for delegates.
+    const ownerOpt = $("inviteRole") && $("inviteRole").querySelector('option[value="owner"]');
+    if (ownerOpt) ownerOpt.hidden = myRole !== "owner";
     renderPeople();                 // show what we already have, instantly
     renderInvites();
     show(peopleOverlay);
@@ -1338,13 +1344,12 @@
     e.preventDefault();
     const email = $("inviteEmail").value.trim().toLowerCase();
     const role = $("inviteRole").value;
-    const inviteName = ($("inviteName") ? $("inviteName").value.trim() : "");
     if (!email) return;
     // If they've already signed in, change their role directly instead.
     const existing = people.find((p) => (p.email || "").toLowerCase() === email);
     if (existing) {
       await changeRole(existing.userId, role);
-      $("inviteEmail").value = ""; if ($("inviteName")) $("inviteName").value = "";
+      $("inviteEmail").value = "";
       toast(`Role updated to ${ROLE_LABEL[role]}`);
       return;
     }
@@ -1352,7 +1357,7 @@
     if (btn) btn.disabled = true;
     // 1) Record the chosen role (+ optional name) so sign-up applies them.
     const { error: invErr } = await sb.from("role_invites").upsert(
-      { email, role, full_name: inviteName || null, invited_by: me.id }, { onConflict: "email" });
+      { email, role, invited_by: me.id }, { onConflict: "email" });
     if (invErr) { if (btn) btn.disabled = false; toast(invErr.message || "Couldn't save the invite — are you the Admin?"); return; }
     // 2) Email a magic link that creates their account (needs sign-ups ON in Supabase).
     const { error } = await sb.auth.signInWithOtp({
@@ -1371,7 +1376,7 @@
       else toast(error.message || "Couldn't send the invite email. The role is saved.");
       return;
     }
-    $("inviteEmail").value = ""; if ($("inviteName")) $("inviteName").value = "";
+    $("inviteEmail").value = "";
     toast(`Invitation emailed to ${email} (${ROLE_LABEL[role]})`);
     loadInvites();
   });
@@ -1388,12 +1393,18 @@
     const list = $("peopleList");
     const order = { owner: 0, delegate: 1, editor: 2, viewer: 3, requester: 4 };
     const sorted = [...people].sort((a, b) => (order[a.role] - order[b.role]) || (a.email || "").localeCompare(b.email || ""));
+    const iAmOwner = myRole === "owner";
+    const manage = canManagePeople();
     list.innerHTML = sorted.map((p) => {
       const isMe = p.userId === me.id;
-      const isOwner = myRole === "owner";
-      // The Owner may remove anyone but themselves; other roles can't remove.
-      const canRemove = isOwner && !isMe;
-      const opts = ROLES.map((r) => `<option value="${r}" ${p.role === r ? "selected" : ""}>${ROLE_LABEL[r]}</option>`).join("");
+      // A delegate (Managing Partner) can manage everyone except Admins; only an
+      // Admin can touch other Admins or grant the Admin role.
+      const protectedRow = p.role === "owner" && !iAmOwner;
+      const canEditRow = manage && !isMe && !protectedRow;
+      // Delegates can't hand out the Admin (owner) role.
+      const opts = ROLES
+        .filter((r) => r !== "owner" || iAmOwner)
+        .map((r) => `<option value="${r}" ${p.role === r ? "selected" : ""}>${ROLE_LABEL[r]}</option>`).join("");
       const label = p.name || p.email || "Unknown";
       return `
         <div class="person-row">
@@ -1402,8 +1413,8 @@
             <span class="person-name">${esc(label)}${isMe ? ' <span class="you-tag">you</span>' : ""}</span>
             <span class="person-email">${esc(p.email || "")}</span>
           </div>
-          <select class="person-role" data-user="${p.userId}" ${isMe || !isOwner ? "disabled" : ""}>${opts}</select>
-          ${canRemove ? `<button class="icon-btn danger" data-remove="${p.userId}" title="Remove access">✕</button>` : ""}
+          <select class="person-role" data-user="${p.userId}" ${canEditRow ? "" : "disabled"}>${opts}</select>
+          ${canEditRow ? `<button class="ghost-btn danger-btn person-remove" data-remove="${p.userId}">Remove</button>` : ""}
         </div>`;
     }).join("");
     list.querySelectorAll(".person-role").forEach((sel) =>
@@ -1415,7 +1426,7 @@
   async function removePerson(userId) {
     const p = people.find((x) => x.userId === userId);
     const who = p ? (p.name || p.email || "this user") : "this user";
-    if (!confirm(`Remove ${who}'s access to the app? They'll be limited to the public office request page. You can re-invite them anytime.`)) return;
+    if (!confirm(`Remove ${who} from TaskTrack? Their role is revoked and their pending invite (if any) is cleared. You can re-invite them anytime.`)) return;
     const { error } = await sb.from("memberships").delete().eq("user_id", userId);
     if (error) { toast(error.message || "Could not remove access"); return; }
     // Also drop any pre-assigned role so a fresh invite is required to return.
@@ -1556,7 +1567,7 @@
 
   // A requester can send at most one reminder per task per hour (and none while
   // one is still pending). Returns ms left in the cooldown, or 0 if clear.
-  const REMINDER_COOLDOWN_MS = 30 * 60 * 1000;   // 30 minutes (matches /office)
+  const REMINDER_COOLDOWN_MS = 30 * 60 * 1000;   // 30 minutes between reminders
   function reminderWaitMs(t) {
     try {
       const last = Number(localStorage.getItem("tasktrack.nudge." + t.id) || 0);
