@@ -84,7 +84,9 @@ the schema but are unused/harmless.
     task visibility · 016 delegate can manage people (not Admins) · 017 fix tasks
     RLS infinite recursion (definer helpers) + public_staff email fallback · 018
     notification_prefs (per-user push/email) · 019 new-request email via channel ·
-    020 realtime memberships · 021 task participants can read/post comments.
+    020 realtime memberships · 021 task participants can read/post comments ·
+    022 profiles readable by any signed-in user (real author names) · 023
+    blocked_users (remove = revoke access; app_current_role null when blocked).
 - Notification config lives in the RLS-locked `public.app_settings`
   (`push_fn_url`, `push_webhook_secret`) — never in the repo.
 

@@ -40,6 +40,7 @@
   // ---- State ----
   let projects = [], tasks = [], people = [];
   let assigneesByTask = {}, recipientsByTask = {};   // task_id -> [user_id]
+  let commentMeta = {};                              // task_id -> { count, last }
   let profilesById = {};
   let me = null, myRole = "requester";
   let scope = "todo", view = "list", query = "";
@@ -105,6 +106,12 @@
 
   function showAuth() {
     hide(bootEl); hide(appEl); hide($("pwSetupScreen")); show(authScreen);
+    try {
+      if (sessionStorage.getItem("tasktrack.removed")) {
+        sessionStorage.removeItem("tasktrack.removed");
+        authMsg("Your access to TaskTrack has been removed. Contact the Admin if this is a mistake.", false);
+      }
+    } catch (e) {}
     $("authEmail").focus();
   }
 
@@ -121,10 +128,25 @@
     return md.password_set === true;
   }
 
+  async function isBlocked() {
+    try {
+      const { data } = await sb.from("blocked_users").select("user_id").eq("user_id", me.id).maybeSingle();
+      return !!data;
+    } catch (e) { return false; }
+  }
+
   async function enterApp(session) {
     if (appReady) return;         // guard against duplicate SIGNED_IN events
     me = session.user;
     hide(authScreen); hide(bootEl);
+
+    // Removed people are signed out (their access has been revoked).
+    if (await isBlocked()) {
+      try { sessionStorage.setItem("tasktrack.removed", "1"); } catch (e) {}
+      await sb.auth.signOut();   // triggers a reload via SIGNED_OUT
+      return;
+    }
+
     await loadRole();
 
     // Invited users must create a password on first entry (so they're never
@@ -144,7 +166,7 @@
       show($("portalScreen"));
       $("portalEmail").textContent = me.email || "";
       loadPortalRecipients();
-      Promise.all([loadTasks(), loadAssignees(), loadRecipients()]).then(() => {
+      Promise.all([loadTasks(), loadAssignees(), loadRecipients(), loadPeople(), loadCommentMeta()]).then(() => {
         primeFlagged();
         subscribeRealtime();
         renderDashboard();
@@ -156,7 +178,7 @@
     // Admin (owner) + Managing Partner (delegate): the full app.
     show(appEl);
     renderAccount();
-    Promise.all([loadProjects(), loadTasks(), loadPeople(), loadAssignees(), loadRecipients()]).then(() => {
+    Promise.all([loadProjects(), loadTasks(), loadPeople(), loadAssignees(), loadRecipients(), loadCommentMeta()]).then(() => {
       primeSeen();             // seed before realtime so existing requests don't toast
       primeFlagged();          // seed so existing reminders don't chime
       saveCache();
@@ -406,6 +428,40 @@
   async function loadRecipients() {
     try { const { data } = await sb.from("task_recipients").select("task_id, user_id"); recipientsByTask = groupByTask(data); } catch (e) {}
   }
+  // Comment counts + latest comment time per task (for the unread indicator).
+  async function loadCommentMeta() {
+    try {
+      const { data } = await sb.from("task_events").select("task_id, created_at, type").eq("type", "comment");
+      const m = {};
+      (data || []).forEach((e) => {
+        const cur = m[e.task_id] || { count: 0, last: "" };
+        cur.count += 1;
+        if (!cur.last || e.created_at > cur.last) cur.last = e.created_at;
+        m[e.task_id] = cur;
+      });
+      commentMeta = m;
+    } catch (e) { /* non-fatal */ }
+  }
+  // Per-viewer "last read" timestamps, in localStorage.
+  function readMap() { try { return JSON.parse(localStorage.getItem("tasktrack.readComments") || "{}"); } catch (e) { return {}; } }
+  function markCommentsRead(taskId) {
+    const meta = commentMeta[taskId];
+    const m = readMap();
+    m[taskId] = (meta && meta.last) || new Date().toISOString();
+    try { localStorage.setItem("tasktrack.readComments", JSON.stringify(m)); } catch (e) {}
+  }
+  function isUnread(taskId) {
+    const meta = commentMeta[taskId];
+    if (!meta || !meta.count) return false;
+    const seen = readMap()[taskId];
+    return !seen || seen < meta.last;
+  }
+  function commentBadge(t) {
+    const meta = commentMeta[t.id];
+    if (!meta || !meta.count) return "";
+    const unread = isUnread(t.id) ? " unread" : "";
+    return `<span class="chip comment-chip${unread}" title="${meta.count} comment${meta.count > 1 ? "s" : ""}">💬 ${meta.count}</span>`;
+  }
 
   async function loadPeople() {
     if (!can.staff()) return;
@@ -523,16 +579,25 @@
         .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, (p) => applyChange("task", p))
         .on("postgres_changes", { event: "*", schema: "public", table: "projects" }, (p) => applyChange("project", p))
         .on("postgres_changes", { event: "INSERT", schema: "public", table: "task_events" }, (p) => {
-          // Refresh whichever activity thread is open for this task (live).
           const tid = p.new && p.new.task_id;
-          if (openTaskId && tid === openTaskId && overlay && !overlay.hidden) loadThread(openTaskId);
-          if (detailTaskId && tid === detailTaskId && !$("detailOverlay").hidden) loadDetailThread(detailTaskId);
+          // Keep the unread-comment badges live.
+          if (p.new && p.new.type === "comment" && tid) {
+            const cur = commentMeta[tid] || { count: 0, last: "" };
+            cur.count += 1;
+            if (!cur.last || p.new.created_at > cur.last) cur.last = p.new.created_at;
+            commentMeta[tid] = cur;
+            rerender();
+          }
+          // Refresh whichever activity thread is open for this task (live).
+          if (openTaskId && tid === openTaskId && overlay && !overlay.hidden) { markCommentsRead(openTaskId); loadThread(openTaskId); }
+          if (detailTaskId && tid === detailTaskId && !$("detailOverlay").hidden) { markCommentsRead(detailTaskId); loadDetailThread(detailTaskId); }
         })
         .on("postgres_changes", { event: "*", schema: "public", table: "task_assignees" }, () => { loadAssignees().then(rerender); })
         .on("postgres_changes", { event: "*", schema: "public", table: "task_recipients" }, () => { loadRecipients().then(rerender); })
         .on("postgres_changes", { event: "*", schema: "public", table: "memberships" }, () => {
-          // Someone joined or a role changed → refresh People + prune stale invites.
+          // Someone joined/left or a role changed.
           if (canManagePeople()) { loadPeople().then(() => { if (!$("peopleOverlay").hidden) renderPeople(); }); loadInvites(); }
+          if ($("rRecipients")) loadPortalRecipients();   // refresh the staff picker for everyone
         })
         .subscribe();
     } catch (e) { /* realtime is best-effort */ }
@@ -822,7 +887,7 @@
       <div class="card prio-${t.priority} ${t.status === "completed" ? "done" : ""} ${t.needsAttention ? "flagged" : ""}" ${drag} data-id="${t.id}">
         <div class="card-title">${esc(t.title)}</div>
         ${notes}
-        <div class="card-meta">${attentionChip(t)}${assigneeChip(t)}${recipientChip(t)}${requestChip(t)}${projectChip(t)}<span class="chip prio ${t.priority}">${t.priority}</span>${dueChip}</div>
+        <div class="card-meta">${attentionChip(t)}${commentBadge(t)}${assigneeChip(t)}${recipientChip(t)}${requestChip(t)}${projectChip(t)}<span class="chip prio ${t.priority}">${t.priority}</span>${dueChip}</div>
       </div>`;
   }
 
@@ -856,7 +921,7 @@
               <div class="list-title">${esc(t.title)}</div>
               ${t.notes ? `<div class="list-sub">${esc(t.notes)}</div>` : ""}
             </div>
-            <div class="list-meta">${attentionChip(t)}${assigneeChip(t)}${recipientChip(t)}${requestChip(t)}${projectChip(t)}<span class="chip prio ${t.priority}">${t.priority}</span>${dueChip}</div>
+            <div class="list-meta">${attentionChip(t)}${commentBadge(t)}${assigneeChip(t)}${recipientChip(t)}${requestChip(t)}${projectChip(t)}<span class="chip prio ${t.priority}">${t.priority}</span>${dueChip}</div>
             ${t.status === "completed" && can.edit() ? `<button class="ghost-btn restore-btn" data-restore="${t.id}" title="Bring this task back">↩ Restore</button>` : ""}
           </div>`;
       }).join("");
@@ -1054,7 +1119,7 @@
     deleteBtn.hidden = !t || !can.delete();
     // Attachments + activity only apply to an already-saved task.
     const extra = $("taskExtra");
-    if (t) { extra.hidden = false; loadThread(t.id); loadAttachments(t.id); }
+    if (t) { extra.hidden = false; markCommentsRead(t.id); loadThread(t.id); loadAttachments(t.id); }
     else { extra.hidden = true; }
     show(overlay);
     setTimeout(() => $("fTitle").focus(), 30);
@@ -1103,9 +1168,11 @@
   let openTaskId = null;
 
   function eventAuthor(ev) {
+    // Prefer the name embedded with the event; fall back to the local cache.
+    if (ev.profiles) return ev.profiles.full_name || ev.profiles.email || "Someone";
     if (!ev.user_id) return "Requester";
     const p = profilesById[ev.user_id];
-    return p ? (p.name || p.email || "Staff") : "Staff";
+    return p ? (p.name || p.email || "Someone") : "Someone";
   }
   function eventLine(ev) {
     const when = new Date(ev.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -1120,7 +1187,7 @@
     const box = $("threadList");
     box.innerHTML = `<div class="thread-empty">Loading…</div>`;
     try {
-      const { data, error } = await sb.from("task_events").select("*").eq("task_id", taskId).order("created_at", { ascending: true });
+      const { data, error } = await sb.from("task_events").select("*, profiles(full_name, email)").eq("task_id", taskId).order("created_at", { ascending: true });
       if (error) throw error;
       if (openTaskId !== taskId) return;   // modal moved on
       renderThread(data || []);
@@ -1315,8 +1382,8 @@
     refreshing = true;
     document.querySelectorAll("#refreshBtn, #portalRefresh").forEach((b) => b.classList.add("spinning"));
     try {
-      if (!["owner", "delegate"].includes(myRole)) { await Promise.all([loadTasks(), loadAssignees(), loadRecipients()]); renderDashboard(); }
-      else { await Promise.all([loadTasks(), loadProjects()]); saveCache(); render(); detectNewRequests(); }
+      if (!["owner", "delegate"].includes(myRole)) { await Promise.all([loadTasks(), loadAssignees(), loadRecipients(), loadCommentMeta()]); renderDashboard(); }
+      else { await Promise.all([loadTasks(), loadProjects(), loadAssignees(), loadRecipients(), loadCommentMeta()]); saveCache(); render(); detectNewRequests(); }
       if (!silent) toast("Refreshed");
     } catch (e) {
       if (!silent) toast("Couldn't refresh — check your connection");
@@ -1444,8 +1511,12 @@
 
   function renderInvites() {
     const el = $("inviteList");
-    if (!invites.length) { el.innerHTML = ""; return; }
-    el.innerHTML = `<p class="people-subhead">Pending invites</p>` + invites.map((i) => `
+    // Only show invites for people who are NOT already members (robust even if
+    // the role_invites row wasn't deleted server-side).
+    const memberEmails = new Set(people.map((p) => (p.email || "").toLowerCase()).filter(Boolean));
+    const pending = invites.filter((i) => !memberEmails.has((i.email || "").toLowerCase()));
+    if (!pending.length) { el.innerHTML = ""; return; }
+    el.innerHTML = `<p class="people-subhead">Pending invites</p>` + pending.map((i) => `
       <div class="invite-row">
         <span class="invite-email">${esc(i.email)}</span>
         <span class="invite-role-tag">${ROLE_LABEL[i.role] || i.role}</span>
@@ -1470,6 +1541,23 @@
     }
     const btn = e.target.querySelector('button[type="submit"]');
     if (btn) btn.disabled = true;
+    // 0) If they already have an account (e.g. a previously-removed user), just
+    // restore their membership + unblock — no need for a fresh magic link.
+    try {
+      const { data: prof } = await sb.from("profiles").select("id").eq("email", email).maybeSingle();
+      if (prof && prof.id) {
+        await sb.from("blocked_users").delete().eq("user_id", prof.id);
+        const { error: mErr } = await sb.from("memberships").upsert(
+          { user_id: prof.id, role, updated_by: me.id, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
+        await sb.from("role_invites").delete().eq("email", email);
+        if (btn) btn.disabled = false;
+        if (mErr) { toast(mErr.message || "Couldn't re-add this person."); return; }
+        $("inviteEmail").value = "";
+        await loadPeople(); renderPeople(); loadInvites();
+        toast(`${email} re-added as ${ROLE_LABEL[role]}`);
+        return;
+      }
+    } catch (e2) { /* fall through to normal invite */ }
     // 1) Record the chosen role (+ optional name) so sign-up applies them.
     const { error: invErr } = await sb.from("role_invites").upsert(
       { email, role, invited_by: me.id }, { onConflict: "email" });
@@ -1541,15 +1629,18 @@
   async function removePerson(userId) {
     const p = people.find((x) => x.userId === userId);
     const who = p ? (p.name || p.email || "this user") : "this user";
-    if (!confirm(`Remove ${who} from TaskTrack? Their role is revoked and their pending invite (if any) is cleared. You can re-invite them anytime.`)) return;
+    if (!confirm(`Remove ${who} from TaskTrack? Their access is revoked immediately and they disappear from all staff lists. You can re-invite them anytime.`)) return;
+    // Block them (revokes access even though the auth account still exists), then
+    // delete the membership so they vanish from every staff list.
+    try { await sb.from("blocked_users").upsert({ user_id: userId, blocked_by: me.id }, { onConflict: "user_id" }); } catch (e) {}
     const { error } = await sb.from("memberships").delete().eq("user_id", userId);
     if (error) { toast(error.message || "Could not remove access"); return; }
-    // Also drop any pre-assigned role so a fresh invite is required to return.
     if (p && p.email) { try { await sb.from("role_invites").delete().eq("email", p.email); } catch (e) {} }
     people = people.filter((x) => x.userId !== userId);
     delete profilesById[userId];
     renderPeople();
-    toast(`${who} removed from the app`);
+    loadPortalRecipients && loadPortalRecipients();   // refresh pickers if present
+    toast(`${who} removed — access revoked`);
   }
 
   async function changeRole(userId, role) {
@@ -1658,7 +1749,7 @@
           <div class="request-main">
             <div class="request-title">${esc(t.title)}</div>
             ${t.notes ? `<div class="list-sub">${esc(t.notes)}</div>` : ""}
-            <div class="request-meta">${from}${dueChip}</div>
+            <div class="request-meta">${from}${dueChip}${commentBadge(t)}</div>
           </div>
           ${control}
         </div>`;
@@ -1700,7 +1791,7 @@
             ${t.notes ? `<div class="list-sub">${esc(t.notes)}</div>` : ""}
             <div class="request-meta">
               <span class="status-badge s-${t.status}">${statusLabel(t.status)}</span>
-              ${dueChip}${nudged}
+              ${dueChip}${nudged}${commentBadge(t)}
             </div>
           </div>
           ${btn}
@@ -1742,6 +1833,7 @@
     const t = tasks.find((x) => x.id === taskId);
     if (!t) return;
     detailTaskId = taskId;
+    markCommentsRead(taskId);
     $("dTitle").textContent = t.title;
     const chips = [
       `<span class="status-badge s-${t.status}">${statusLabel(t.status)}</span>`,
@@ -1773,7 +1865,7 @@
     const box = $("dThreadList");
     box.innerHTML = `<div class="thread-empty">Loading…</div>`;
     try {
-      const { data, error } = await sb.from("task_events").select("*").eq("task_id", taskId).order("created_at", { ascending: true });
+      const { data, error } = await sb.from("task_events").select("*, profiles(full_name, email)").eq("task_id", taskId).order("created_at", { ascending: true });
       if (error) throw error;
       if (detailTaskId !== taskId) return;
       if (!data || !data.length) { box.innerHTML = `<div class="thread-empty">No activity yet.</div>`; return; }
@@ -1907,6 +1999,40 @@
   });
   if ($("settingsSignOut")) $("settingsSignOut").addEventListener("click", async () => { await sb.auth.signOut(); });
 
+  // ---- Health check: verify the DB / migrations / features are wired ----
+  async function runHealthCheck() {
+    const box = $("healthResults");
+    box.hidden = false;
+    box.innerHTML = `<div class="health-row">Running…</div>`;
+    const checks = [
+      ["Tasks readable (RLS fix 017)", () => sb.from("tasks").select("id").limit(1)],
+      ["Multiple assignees (012/013)", () => sb.from("task_assignees").select("task_id").limit(1)],
+      ["Request recipients (013)", () => sb.from("task_recipients").select("task_id").limit(1)],
+      ["Comment author names (021/022)", () => sb.from("task_events").select("id, profiles(full_name)").limit(1)],
+      ["Notification prefs (018)", () => sb.from("notification_prefs").select("user_id").limit(1)],
+      ["Remove/block users (023)", () => sb.from("blocked_users").select("user_id").limit(1)],
+      ["Staff directory RPC (013/017)", () => sb.rpc("public_staff")],
+    ];
+    const rows = [];
+    for (const [label, fn] of checks) {
+      let ok = true, msg = "";
+      try { const { error } = await fn(); if (error) { ok = false; msg = error.message; } }
+      catch (e) { ok = false; msg = String(e && e.message || e); }
+      rows.push(`<div class="health-row ${ok ? "ok" : "bad"}"><span>${ok ? "✓" : "✗"}</span> <span>${esc(label)}</span>${ok ? "" : `<small>${esc(msg)}</small>`}</div>`);
+    }
+    // Push config lives in the RLS-locked app_settings, which the browser can't
+    // read — so we can only note whether this device is subscribed.
+    let pushNote = "Push: enable it in Settings on each device.";
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      pushNote = sub ? "Push: this device is subscribed." : "Push: this device is not subscribed yet.";
+    } catch (e) {}
+    rows.push(`<div class="health-row note"><span>ℹ️</span> <span>${esc(pushNote)}</span></div>`);
+    box.innerHTML = rows.join("");
+  }
+  if ($("healthBtn")) $("healthBtn").addEventListener("click", runHealthCheck);
+
   function urlB64ToUint8(base64) {
     const pad = "=".repeat((4 - (base64.length % 4)) % 4);
     const b64 = (base64 + pad).replace(/-/g, "+").replace(/_/g, "/");
@@ -1933,6 +2059,21 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => (toastEl.hidden = true), 2400);
   }
+
+  // ---- Surface uncaught errors instead of failing silently ----
+  const _seenErrors = new Set();
+  function surfaceError(msg) {
+    msg = String(msg || "Something went wrong").replace(/\s+/g, " ").slice(0, 160);
+    if (_seenErrors.has(msg)) return;
+    _seenErrors.add(msg);
+    console.error("[TaskTrack]", msg);
+    try { if (toastEl) toast("⚠️ " + msg); } catch (e) {}
+  }
+  window.addEventListener("error", (e) => surfaceError(e && (e.message || (e.error && e.error.message))));
+  window.addEventListener("unhandledrejection", (e) => {
+    const r = e && e.reason;
+    surfaceError(r && (r.message || r.error_description || r.msg) || r);
+  });
 
   // ---- Go ----
   boot();

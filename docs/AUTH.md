@@ -35,6 +35,24 @@ real email provider once:
 Once custom SMTP is on, the per-hour cap is set by your provider (far higher),
 and links/reset emails are reliable.
 
+### Resend (recommended — same provider as the app's other emails)
+
+To make **invite and password-reset emails come from Resend** (not Gmail), point
+Supabase Auth's SMTP at Resend:
+
+1. In Resend, verify your sending domain (`teasooconsulting.com`) and copy an
+   **API key** (`re_…`).
+2. Supabase → **Authentication → Emails → SMTP Settings** → enable **Custom SMTP**:
+   - **Host:** `smtp.resend.com`
+   - **Port:** `465` (SSL) or `587` (TLS)
+   - **Username:** `resend`
+   - **Password:** your Resend API key (`re_…`)
+   - **Sender email:** an address on your verified domain, e.g. `no-reply@teasooconsulting.com`
+   - **Sender name:** `MP Office` (or `TaskTrack`)
+3. **Save.** All auth emails (magic-link invites, password resets) now send via
+   Resend. This is independent of the `EMAIL_FROM`/`RESEND_API_KEY` you set on the
+   `send-push` function (that one handles in-app notification emails).
+
 ### Google Workspace (step by step)
 
 Easiest route — an **App Password** on a sending mailbox in your domain:

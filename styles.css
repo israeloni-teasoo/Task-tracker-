@@ -516,6 +516,9 @@ body {
 /* Assignee / recipient chips */
 .chip.assignee-chip { background: rgba(139,92,246,.14); color: #7c3aed; }
 .chip.recipient-chip { background: rgba(20,184,166,.16); color: #0d9488; }
+.chip.comment-chip { background: var(--c-bg); color: var(--c-text-soft); }
+.chip.comment-chip.unread { background: rgba(79,70,229,.14); color: var(--c-accent); font-weight: 700; position: relative; }
+.chip.comment-chip.unread::after { content: ""; position: absolute; top: -3px; right: -3px; width: 8px; height: 8px; background: #ef4444; border-radius: 50%; border: 1.5px solid var(--c-surface); }
 
 /* Checkbox group (assignees / recipients) */
 .check-group { display: flex; flex-direction: column; gap: 2px; max-height: 180px; overflow-y: auto; border: 1px solid var(--c-border); border-radius: 9px; padding: 6px; background: var(--c-surface-2); }
@@ -535,6 +538,12 @@ body {
 .setting-name { font-size: 14px; font-weight: 600; }
 .setting-sub { font-size: 12px; color: var(--c-text-faint); margin-top: 2px; }
 .setting-actions { display: flex; gap: 8px; flex: none; }
+.health-results { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.health-row { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; padding: 6px 8px; border-radius: 8px; background: var(--c-bg); flex-wrap: wrap; }
+.health-row.ok { color: #16a34a; }
+.health-row.bad { color: var(--s-blocked); }
+.health-row.note { color: var(--c-text-soft); }
+.health-row small { flex-basis: 100%; color: var(--c-text-faint); }
 /* Filter bar (admin task view) */
 .filter-bar { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 24px 0; align-items: center; }
 .filter-select { border: 1px solid var(--c-border); background: var(--c-surface); color: var(--c-text); border-radius: 8px; padding: 7px 10px; font: inherit; font-size: 12.5px; max-width: 180px; }

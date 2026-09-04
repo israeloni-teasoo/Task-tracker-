@@ -463,6 +463,16 @@
           </div>
           <button type="button" class="danger-btn" id="settingsSignOut">Sign out</button>
         </div>
+
+        <p class="settings-section-label">Diagnostics</p>
+        <div class="setting-row">
+          <div class="setting-text">
+            <div class="setting-name">Health check</div>
+            <div class="setting-sub">Verify the database, migrations and notifications are wired up.</div>
+          </div>
+          <button type="button" class="ghost-btn" id="healthBtn">Run check</button>
+        </div>
+        <div id="healthResults" class="health-results" hidden></div>
       </div>
     </div>
   </div>

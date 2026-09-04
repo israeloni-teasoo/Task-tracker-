@@ -42,6 +42,13 @@ create table public.role_invites (
   created_at timestamptz not null default now()
 );
 
+-- Removed people: their access is revoked and they can't slip back in.
+create table public.blocked_users (
+  user_id    uuid primary key references public.profiles(id) on delete cascade,
+  blocked_by uuid references public.profiles(id) on delete set null,
+  blocked_at timestamptz not null default now()
+);
+
 -- Projects group tasks (e.g. "Work", "Personal", "Board of Directors").
 -- Shared across the workspace; staff (editor+) manage them.
 create table public.projects (
@@ -163,7 +170,10 @@ create table public.app_settings (
 
 create or replace function public.app_current_role()
 returns app_role language sql stable security definer set search_path = public as $$
-  select role from public.memberships where user_id = auth.uid();
+  select case
+    when exists (select 1 from public.blocked_users where user_id = auth.uid()) then null
+    else (select role from public.memberships where user_id = auth.uid())
+  end;
 $$;
 
 create or replace function public.is_owner()
@@ -370,11 +380,13 @@ alter table public.task_attachments    enable row level security;
 alter table public.task_assignees      enable row level security;
 alter table public.task_recipients     enable row level security;
 alter table public.notification_prefs  enable row level security;
+alter table public.blocked_users       enable row level security;
 alter table public.app_settings        enable row level security;   -- no policies: server-only
 
--- profiles: see your own; staff see everyone; you can edit your own.
+-- profiles: any signed-in colleague can read names/emails (for comment authors,
+-- assignees, recipients); you can edit only your own.
 create policy profiles_select on public.profiles for select
-  using (id = auth.uid() or public.is_staff());
+  using (auth.uid() is not null);
 create policy profiles_update_own on public.profiles for update
   using (id = auth.uid()) with check (id = auth.uid());
 
@@ -472,6 +484,13 @@ create policy push_own on public.push_subscriptions for all
 -- notification_prefs: each person manages their own channel preferences.
 create policy notif_prefs_own on public.notification_prefs for all
   using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+-- blocked_users: self-readable; Admin + Managing Partner manage.
+create policy blocked_self_select on public.blocked_users for select
+  using (user_id = auth.uid() or public.is_owner() or public.app_current_role() = 'delegate');
+create policy blocked_manage on public.blocked_users for all
+  using (public.is_owner() or public.app_current_role() = 'delegate')
+  with check (public.is_owner() or public.app_current_role() = 'delegate');
 
 -- reminders: staff (editor+) manage reminders.
 create policy reminders_staff on public.reminders for all
