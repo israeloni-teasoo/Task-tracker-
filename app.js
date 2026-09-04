@@ -37,6 +37,7 @@
   let profilesById = {};
   let me = null, myRole = "requester";
   let scope = "all", view = "list", query = "";
+  let filters = { priority: "", assignee: "", requester: "", dept: "", due: "" };
   let appReady = false, realtimeChannel = null;
   const seenTaskIds = new Set();   // for "new request" toasts
 
@@ -581,6 +582,12 @@
       if (scope === "attention" && !t.needsAttention) return false;
       if (scope === "completed" && t.status !== "completed") return false;
       if (scope.startsWith("project:") && t.projectId !== scope.slice(8)) return false;
+      // Top filter bar
+      if (filters.priority && t.priority !== filters.priority) return false;
+      if (filters.assignee && !(assigneesByTask[t.id] || []).includes(filters.assignee)) return false;
+      if (filters.requester && t.requesterId !== filters.requester) return false;
+      if (filters.dept && (t.requesterDept || "") !== filters.dept) return false;
+      if (filters.due && !matchesDueFilter(t.due, filters.due)) return false;
       if (query) {
         const hay = (t.title + " " + (t.notes || "")).toLowerCase();
         if (!hay.includes(query)) return false;
@@ -593,9 +600,59 @@
     renderSidebarProjects();
     updateCounts();
     reflectPermissions();
+    renderFilterBar();
     if (view === "board") { show(boardView); hide(listView); renderBoard(); }
     else { hide(boardView); show(listView); renderList(); }
   }
+
+  // Within the next 7 days (today..+7), not overdue.
+  function matchesDueFilter(due, mode) {
+    if (mode === "none") return !due;
+    const ds = dueState(due);
+    if (mode === "overdue") return ds === "overdue";
+    if (mode === "today") return ds === "today";
+    if (mode === "week") {
+      if (!due) return false;
+      const d = new Date(due), now = new Date();
+      const end = new Date(); end.setDate(now.getDate() + 7);
+      return d >= new Date(now.getFullYear(), now.getMonth(), now.getDate()) && d <= end;
+    }
+    return true;
+  }
+
+  // Populate the filter selects from live data, preserving current choices.
+  function renderFilterBar() {
+    const bar = $("filterBar");
+    if (!bar) return;
+    const fill = (id, opts, cur) => {
+      const el = $(id); if (!el) return;
+      const first = el.querySelector("option");
+      el.innerHTML = (first ? first.outerHTML : "") +
+        opts.map((o) => `<option value="${esc(o.v)}" ${o.v === cur ? "selected" : ""}>${esc(o.label)}</option>`).join("");
+      el.value = cur || "";
+    };
+    // Assignees: staff (anyone assignable)
+    fill("fltAssignee", people.map((p) => ({ v: p.userId, label: p.name || p.email || "User" })), filters.assignee);
+    // Requesters: distinct people who raised requests
+    const reqSeen = new Set(), reqs = [];
+    tasks.forEach((t) => {
+      if (t.source === "request" && t.requesterId && !reqSeen.has(t.requesterId)) {
+        reqSeen.add(t.requesterId); reqs.push({ v: t.requesterId, label: requesterLabel(t) });
+      }
+    });
+    fill("fltRequester", reqs, filters.requester);
+    // Departments: distinct non-empty departments
+    const depts = [...new Set(tasks.map((t) => (t.requesterDept || "").trim()).filter(Boolean))].sort();
+    fill("fltDept", depts.map((d) => ({ v: d, label: d })), filters.dept);
+    if ($("fltPriority")) $("fltPriority").value = filters.priority || "";
+    if ($("fltDue")) $("fltDue").value = filters.due || "";
+    const any = filters.priority || filters.assignee || filters.requester || filters.dept || filters.due;
+    if ($("fltClear")) $("fltClear").hidden = !any;
+  }
+
+  [["fltPriority", "priority"], ["fltAssignee", "assignee"], ["fltRequester", "requester"], ["fltDept", "dept"], ["fltDue", "due"]]
+    .forEach(([id, key]) => { const el = $(id); if (el) el.addEventListener("change", () => { filters[key] = el.value; render(); }); });
+  if ($("fltClear")) $("fltClear").addEventListener("click", () => { filters = { priority: "", assignee: "", requester: "", dept: "", due: "" }; render(); });
 
   // Hide create/edit affordances for read-only roles (viewer / requester).
   // Admin (owner) and the Managing Partner (delegate) manage people.
@@ -1504,7 +1561,25 @@
 
   function rerender() { if (["owner", "delegate"].includes(myRole)) render(); else renderDashboard(); }
 
-  function renderDashboard() { renderAssigned(); renderRequests(); }
+  let portalView = "assigned";
+  function setPortalView(v) {
+    portalView = v;
+    document.querySelectorAll(".pnav-btn").forEach((b) => b.classList.toggle("active", b.dataset.pview === v));
+    const map = { assigned: "assignedSection", new: "newSection", mine: "mineSection" };
+    Object.entries(map).forEach(([k, id]) => { const el = $(id); if (el) el.hidden = k !== v; });
+  }
+  document.querySelectorAll(".pnav-btn").forEach((b) => b.addEventListener("click", () => setPortalView(b.dataset.pview)));
+
+  function renderDashboard() {
+    renderAssigned();
+    renderRequests();
+    // section counts
+    const uid = me && me.id;
+    const assigned = tasks.filter((t) => isMine(t) && t.requesterId !== uid).length;
+    const mine = tasks.filter((t) => t.requesterId === uid).length;
+    const ca = document.querySelector('[data-pcount="assigned"]'); if (ca) ca.textContent = assigned;
+    const cm = document.querySelector('[data-pcount="mine"]'); if (cm) cm.textContent = mine;
+  }
 
   // Tasks assigned to me or directed to me (that I didn't raise myself).
   function renderAssigned() {

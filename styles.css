@@ -176,6 +176,20 @@ body {
 .portal-top { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; background: var(--c-surface); border-bottom: 1px solid var(--c-border); }
 .portal-account { display: flex; align-items: center; gap: 12px; }
 .portal-body { max-width: 680px; margin: 0 auto; padding: 24px 20px 60px; display: flex; flex-direction: column; gap: 28px; }
+/* Dashboard with side nav (one view at a time) */
+.portal-shell { max-width: 920px; margin: 0 auto; padding: 20px; display: grid; grid-template-columns: 220px 1fr; gap: 20px; align-items: start; }
+.portal-nav { display: flex; flex-direction: column; gap: 4px; position: sticky; top: 20px; }
+.pnav-btn { display: flex; align-items: center; gap: 10px; text-align: left; border: none; background: transparent; color: var(--c-text-soft); font: inherit; font-size: 14px; font-weight: 600; padding: 11px 12px; border-radius: 10px; cursor: pointer; }
+.pnav-btn:hover { background: var(--c-surface); }
+.pnav-btn.active { background: var(--c-surface); color: var(--c-text); box-shadow: var(--shadow-sm); }
+.pnav-btn .count { margin-left: auto; font-size: 12px; background: var(--c-bg); color: var(--c-text-faint); border-radius: 999px; padding: 1px 8px; }
+.portal-main { min-width: 0; }
+@media (max-width: 720px) {
+  .portal-shell { grid-template-columns: 1fr; gap: 14px; padding: 14px; }
+  .portal-nav { flex-direction: row; overflow-x: auto; position: static; gap: 6px; }
+  .pnav-btn { flex: 1 0 auto; justify-content: center; }
+  .pnav-btn .count { display: none; }
+}
 .portal-new, .portal-list { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: 14px; padding: 22px; }
 .portal-new h2, .portal-list h2 { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
 .portal-hint { font-size: 13px; color: var(--c-text-faint); margin-bottom: 16px; }
@@ -511,6 +525,13 @@ body {
 .setting-name { font-size: 14px; font-weight: 600; }
 .setting-sub { font-size: 12px; color: var(--c-text-faint); margin-top: 2px; }
 .setting-actions { display: flex; gap: 8px; flex: none; }
+/* Filter bar (admin task view) */
+.filter-bar { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 24px 0; align-items: center; }
+.filter-select { border: 1px solid var(--c-border); background: var(--c-surface); color: var(--c-text); border-radius: 8px; padding: 7px 10px; font: inherit; font-size: 12.5px; max-width: 180px; }
+.filter-select:focus { outline: none; border-color: var(--c-accent); }
+.filter-clear { padding: 6px 10px; font-size: 12.5px; }
+@media (max-width: 720px) { .filter-bar { padding: 10px 14px 0; } .filter-select { flex: 1 1 40%; max-width: none; } }
+
 .settings-section-label { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--c-text-faint); font-weight: 700; margin: 14px 0 2px; }
 .settings-section-label:first-child { margin-top: 0; }
 /* Toggle switch */

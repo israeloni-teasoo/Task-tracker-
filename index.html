@@ -106,13 +106,19 @@
         <button class="ghost-btn" id="portalSignOut">Sign out</button>
       </div>
     </header>
-    <div class="portal-body">
-      <section class="portal-list" id="assignedSection">
+    <div class="portal-shell">
+      <nav class="portal-nav" aria-label="Sections">
+        <button class="pnav-btn active" data-pview="assigned"><span class="pnav-ico">📥</span> Assigned to me <span class="count" data-pcount="assigned">0</span></button>
+        <button class="pnav-btn" data-pview="new"><span class="pnav-ico">✍️</span> New request</button>
+        <button class="pnav-btn" data-pview="mine"><span class="pnav-ico">📮</span> My requests <span class="count" data-pcount="mine">0</span></button>
+      </nav>
+      <div class="portal-main">
+      <section class="portal-list portal-view" id="assignedSection">
         <h2>Assigned to me</h2>
         <p class="portal-hint">Tasks assigned to you and requests sent your way.</p>
         <div id="assignedList"><!-- rendered by JS --></div>
       </section>
-      <section class="portal-new">
+      <section class="portal-new portal-view" id="newSection" hidden>
         <h2>Request something from the office</h2>
         <p class="portal-hint">Log what you need. You'll be able to track its status here and send a reminder if it's taking too long.</p>
         <form id="requestForm">
@@ -141,15 +147,16 @@
           <div class="field">
             <span>Who is this for?</span>
             <div id="rRecipients" class="check-group"><span class="check-empty">Loading staff…</span></div>
-            <small class="field-help">Pick who should handle it. Leave empty to send to the whole office.</small>
+            <small class="field-help">Pick who should handle it. Leave empty (or pick Everyone) to send to the whole team.</small>
           </div>
           <button type="submit" class="primary-btn wide">Submit request</button>
         </form>
       </section>
-      <section class="portal-list">
+      <section class="portal-list portal-view" id="mineSection" hidden>
         <h2>My requests</h2>
         <div id="requestList"><!-- rendered by JS --></div>
       </section>
+      </div>
     </div>
   </div>
 
@@ -235,6 +242,27 @@
           <button class="primary-btn" id="newTaskBtn">＋ New task</button>
         </div>
       </header>
+
+      <!-- Filter bar -->
+      <div class="filter-bar" id="filterBar">
+        <select class="filter-select" id="fltPriority" aria-label="Filter by priority">
+          <option value="">All priorities</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+        </select>
+        <select class="filter-select" id="fltAssignee" aria-label="Filter by assignee"><option value="">All assignees</option></select>
+        <select class="filter-select" id="fltRequester" aria-label="Filter by requester"><option value="">All requesters</option></select>
+        <select class="filter-select" id="fltDept" aria-label="Filter by department"><option value="">All departments</option></select>
+        <select class="filter-select" id="fltDue" aria-label="Filter by due date">
+          <option value="">Any date</option>
+          <option value="overdue">Overdue</option>
+          <option value="today">Due today</option>
+          <option value="week">Next 7 days</option>
+          <option value="none">No due date</option>
+        </select>
+        <button class="ghost-btn filter-clear" id="fltClear" hidden>Clear</button>
+      </div>
 
       <!-- Board view -->
       <section id="boardView" class="board" aria-label="Board view" hidden></section>
