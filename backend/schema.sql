@@ -196,6 +196,13 @@ create or replace function public.is_recipient(p_task uuid, p_user uuid)
 returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.task_recipients where task_id = p_task and user_id = p_user);
 $$;
+-- Anyone attached to a task: its requester, an assignee, or a recipient.
+create or replace function public.is_task_participant(p_task uuid, p_user uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.tasks where id = p_task and requester_id = p_user)
+      or public.is_assignee(p_task, p_user)
+      or public.is_recipient(p_task, p_user);
+$$;
 
 -- ---------- New-user bootstrap ----------
 -- On sign-up, create a profile and give the 'requester' role by default.
@@ -435,27 +442,15 @@ create policy tasks_update_staff on public.tasks for update
 create policy tasks_delete_staff on public.tasks for delete
   using (public.can_delete());
 
--- task_events: readable by staff or the request's owner; you insert as yourself.
+-- task_events: readable/insertable by staff or anyone attached to the task.
 create policy events_select on public.task_events for select
-  using (
-    public.is_staff()
-    or exists (select 1 from public.tasks t where t.id = task_id and t.requester_id = auth.uid())
-  );
+  using (public.is_staff() or public.is_task_participant(task_id, auth.uid()));
 create policy events_insert on public.task_events for insert
-  with check (
-    user_id = auth.uid()
-    and (
-      public.is_staff()
-      or exists (select 1 from public.tasks t where t.id = task_id and t.requester_id = auth.uid())
-    )
-  );
+  with check (user_id = auth.uid() and (public.is_staff() or public.is_task_participant(task_id, auth.uid())));
 
 -- task_attachments: staff or the request's owner may read; staff insert as self.
 create policy att_meta_select on public.task_attachments for select
-  using (
-    public.is_staff()
-    or exists (select 1 from public.tasks t where t.id = task_id and t.requester_id = auth.uid())
-  );
+  using (public.is_staff() or public.is_task_participant(task_id, auth.uid()));
 create policy att_meta_insert_staff on public.task_attachments for insert
   with check (public.is_staff() and uploaded_by = auth.uid());
 

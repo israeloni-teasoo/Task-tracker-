@@ -37,7 +37,7 @@
   let profilesById = {};
   let me = null, myRole = "requester";
   let scope = "todo", view = "list", query = "";
-  let filters = { priority: "", assignee: "", requester: "", dept: "", due: "" };
+  let filters = { priority: "", assignee: [], requester: [], dept: "", due: "" };
   let appReady = false, realtimeChannel = null;
   const seenTaskIds = new Set();   // for "new request" toasts
 
@@ -517,8 +517,10 @@
         .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, (p) => applyChange("task", p))
         .on("postgres_changes", { event: "*", schema: "public", table: "projects" }, (p) => applyChange("project", p))
         .on("postgres_changes", { event: "INSERT", schema: "public", table: "task_events" }, (p) => {
-          // Refresh the activity thread live if its task's modal is open.
-          if (openTaskId && p.new && p.new.task_id === openTaskId && overlay && !overlay.hidden) loadThread(openTaskId);
+          // Refresh whichever activity thread is open for this task (live).
+          const tid = p.new && p.new.task_id;
+          if (openTaskId && tid === openTaskId && overlay && !overlay.hidden) loadThread(openTaskId);
+          if (detailTaskId && tid === detailTaskId && !$("detailOverlay").hidden) loadDetailThread(detailTaskId);
         })
         .on("postgres_changes", { event: "*", schema: "public", table: "task_assignees" }, () => { loadAssignees().then(rerender); })
         .on("postgres_changes", { event: "*", schema: "public", table: "task_recipients" }, () => { loadRecipients().then(rerender); })
@@ -606,8 +608,11 @@
       if (scope.startsWith("project:") && t.projectId !== scope.slice(8)) return false;
       // Top filter bar
       if (filters.priority && t.priority !== filters.priority) return false;
-      if (filters.assignee && !(assigneesByTask[t.id] || []).includes(filters.assignee)) return false;
-      if (filters.requester && t.requesterId !== filters.requester) return false;
+      if (filters.assignee.length) {
+        const a = assigneesByTask[t.id] || [];
+        if (!filters.assignee.some((id) => a.includes(id))) return false;
+      }
+      if (filters.requester.length && !filters.requester.includes(t.requesterId)) return false;
       if (filters.dept && (t.requesterDept || "") !== filters.dept) return false;
       if (filters.due && !matchesDueFilter(t.due, filters.due)) return false;
       if (query) {
@@ -642,39 +647,59 @@
     return true;
   }
 
-  // Populate the filter selects from live data, preserving current choices.
+  // Build a checkbox multi-select panel and its button label.
+  function renderMultiFilter(wrapId, key, opts, allLabel) {
+    const wrap = $(wrapId); if (!wrap) return;
+    const btn = wrap.querySelector(".ms-btn"), panel = wrap.querySelector(".ms-panel");
+    const sel = filters[key];
+    btn.textContent = (sel.length ? `${allLabel.split(" ")[0]}: ${sel.length}` : allLabel) + " ▾";
+    btn.classList.toggle("has-value", sel.length > 0);
+    panel.innerHTML = opts.length
+      ? opts.map((o) => `<label class="ms-item"><input type="checkbox" value="${esc(o.v)}" ${sel.includes(o.v) ? "checked" : ""}/> <span>${esc(o.label)}</span></label>`).join("")
+      : `<div class="ms-empty">Nothing to filter yet.</div>`;
+    panel.querySelectorAll('input[type="checkbox"]').forEach((c) => c.addEventListener("change", () => {
+      filters[key] = Array.from(panel.querySelectorAll('input:checked')).map((x) => x.value);
+      render();
+    }));
+  }
+
+  // Populate the filter bar from live data, preserving current choices.
   function renderFilterBar() {
-    const bar = $("filterBar");
-    if (!bar) return;
-    const fill = (id, opts, cur) => {
-      const el = $(id); if (!el) return;
-      const first = el.querySelector("option");
-      el.innerHTML = (first ? first.outerHTML : "") +
-        opts.map((o) => `<option value="${esc(o.v)}" ${o.v === cur ? "selected" : ""}>${esc(o.label)}</option>`).join("");
-      el.value = cur || "";
-    };
-    // Assignees: staff (anyone assignable)
-    fill("fltAssignee", people.map((p) => ({ v: p.userId, label: p.name || p.email || "User" })), filters.assignee);
-    // Requesters: distinct people who raised requests
+    if (!$("filterBar")) return;
+    renderMultiFilter("msAssignee", "assignee",
+      people.map((p) => ({ v: p.userId, label: p.name || p.email || "User" })), "All assignees");
     const reqSeen = new Set(), reqs = [];
     tasks.forEach((t) => {
       if (t.source === "request" && t.requesterId && !reqSeen.has(t.requesterId)) {
         reqSeen.add(t.requesterId); reqs.push({ v: t.requesterId, label: requesterLabel(t) });
       }
     });
-    fill("fltRequester", reqs, filters.requester);
-    // Departments: distinct non-empty departments
+    renderMultiFilter("msRequester", "requester", reqs, "All requesters");
     const depts = [...new Set(tasks.map((t) => (t.requesterDept || "").trim()).filter(Boolean))].sort();
-    fill("fltDept", depts.map((d) => ({ v: d, label: d })), filters.dept);
+    const dEl = $("fltDept");
+    if (dEl) {
+      const first = dEl.querySelector("option");
+      dEl.innerHTML = (first ? first.outerHTML : "") + depts.map((d) => `<option value="${esc(d)}" ${d === filters.dept ? "selected" : ""}>${esc(d)}</option>`).join("");
+      dEl.value = filters.dept || "";
+    }
     if ($("fltPriority")) $("fltPriority").value = filters.priority || "";
     if ($("fltDue")) $("fltDue").value = filters.due || "";
-    const any = filters.priority || filters.assignee || filters.requester || filters.dept || filters.due;
+    const any = filters.priority || filters.assignee.length || filters.requester.length || filters.dept || filters.due;
     if ($("fltClear")) $("fltClear").hidden = !any;
   }
 
-  [["fltPriority", "priority"], ["fltAssignee", "assignee"], ["fltRequester", "requester"], ["fltDept", "dept"], ["fltDue", "due"]]
+  [["fltPriority", "priority"], ["fltDept", "dept"], ["fltDue", "due"]]
     .forEach(([id, key]) => { const el = $(id); if (el) el.addEventListener("change", () => { filters[key] = el.value; render(); }); });
-  if ($("fltClear")) $("fltClear").addEventListener("click", () => { filters = { priority: "", assignee: "", requester: "", dept: "", due: "" }; render(); });
+  // Multi-select dropdowns open/close.
+  document.querySelectorAll(".ms-btn").forEach((btn) => btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const panel = btn.parentElement.querySelector(".ms-panel");
+    document.querySelectorAll(".ms-panel").forEach((p) => { if (p !== panel) p.hidden = true; });
+    panel.hidden = !panel.hidden;
+  }));
+  document.addEventListener("click", () => document.querySelectorAll(".ms-panel").forEach((p) => (p.hidden = true)));
+  document.querySelectorAll(".ms-panel").forEach((p) => p.addEventListener("click", (e) => e.stopPropagation()));
+  if ($("fltClear")) $("fltClear").addEventListener("click", () => { filters = { priority: "", assignee: [], requester: [], dept: "", due: "" }; render(); });
 
   // Hide create/edit affordances for read-only roles (viewer / requester).
   // Admin (owner) and the Managing Partner (delegate) manage people.
@@ -1623,7 +1648,7 @@
         ? `<select class="assigned-status" data-set="${t.id}">${STATUSES.map((s) => `<option value="${s.key}" ${t.status === s.key ? "selected" : ""}>${s.label}</option>`).join("")}</select>`
         : `<span class="status-badge s-${t.status}">${statusLabel(t.status)}</span>`;
       return `
-        <div class="request-row ${done ? "done" : ""}">
+        <div class="request-row clickable ${done ? "done" : ""}" data-open="${t.id}">
           <div class="request-main">
             <div class="request-title">${esc(t.title)}</div>
             ${t.notes ? `<div class="list-sub">${esc(t.notes)}</div>` : ""}
@@ -1633,7 +1658,9 @@
         </div>`;
     }).join("");
     if (canSet) box.querySelectorAll("[data-set]").forEach((sel) =>
-      sel.addEventListener("change", () => updateTask(sel.dataset.set, { status: sel.value })));
+      sel.addEventListener("change", (e) => { e.stopPropagation(); updateTask(sel.dataset.set, { status: sel.value }); }));
+    box.querySelectorAll("[data-open]").forEach((row) =>
+      row.addEventListener("click", (e) => { if (!e.target.closest("select,button,a")) openDetail(row.dataset.open); }));
   }
 
   function renderRequests() {
@@ -1661,7 +1688,7 @@
         btn = `<button class="ghost-btn nudge-btn" data-nudge="${t.id}" ${blocked ? "disabled" : ""}>${label}</button>`;
       }
       return `
-        <div class="request-row ${done ? "done" : ""}">
+        <div class="request-row clickable ${done ? "done" : ""}" data-open="${t.id}">
           <div class="request-main">
             <div class="request-title">${esc(t.title)}</div>
             ${t.notes ? `<div class="list-sub">${esc(t.notes)}</div>` : ""}
@@ -1673,7 +1700,9 @@
           ${btn}
         </div>`;
     }).join("");
-    list.querySelectorAll("[data-nudge]").forEach((b) => b.addEventListener("click", () => nudge(b.dataset.nudge)));
+    list.querySelectorAll("[data-nudge]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); nudge(b.dataset.nudge); }));
+    list.querySelectorAll("[data-open]").forEach((row) =>
+      row.addEventListener("click", (e) => { if (!e.target.closest("select,button,a")) openDetail(row.dataset.open); }));
   }
 
   // A requester can send at most one reminder per task per hour (and none while
@@ -1697,6 +1726,74 @@
     renderRequests();
     toast("Reminder sent — they'll see it flagged");
   }
+
+  // ============================================================
+  //  Task detail modal (staff dashboard: view, comment, re-assign)
+  // ============================================================
+  let detailTaskId = null;
+
+  function openDetail(taskId) {
+    const t = tasks.find((x) => x.id === taskId);
+    if (!t) return;
+    detailTaskId = taskId;
+    $("dTitle").textContent = t.title;
+    const chips = [
+      `<span class="status-badge s-${t.status}">${statusLabel(t.status)}</span>`,
+      t.due ? `<span class="chip due">📅 ${formatDue(t.due)}</span>` : "",
+      `<span class="chip prio ${t.priority}">${t.priority}</span>`,
+      t.source === "request" ? `<span class="chip request-chip">📨 ${esc(requesterLabel(t))}</span>` : "",
+      (assigneesByTask[t.id] || []).length ? `<span class="chip assignee-chip">👤 ${esc((assigneesByTask[t.id] || []).map(nameOf).join(", "))}</span>` : "",
+    ].filter(Boolean).join("");
+    $("dMeta").innerHTML = chips;
+    $("dNotes").textContent = t.notes || "";
+    // Re-assign: available to editors+ who are attached to the task.
+    const canReassign = can.edit();
+    $("dReassignSection").hidden = !canReassign;
+    if (canReassign) {
+      const chosen = new Set(assigneesByTask[t.id] || []);
+      const assignable = people.filter((p) => p.userId);
+      $("dAssignees").innerHTML = assignable.length
+        ? assignable.map((p) => `<label class="check-item"><input type="checkbox" value="${p.userId}" ${chosen.has(p.userId) ? "checked" : ""}/> <span>${esc(p.name || p.email || "User")}</span></label>`).join("")
+        : `<span class="check-empty">No people to assign yet.</span>`;
+    }
+    loadDetailThread(taskId);
+    show($("detailOverlay"));
+  }
+  const closeDetail = () => { hide($("detailOverlay")); detailTaskId = null; };
+  $("dClose").addEventListener("click", closeDetail);
+  $("detailOverlay").addEventListener("click", (e) => { if (e.target === $("detailOverlay")) closeDetail(); });
+
+  async function loadDetailThread(taskId) {
+    const box = $("dThreadList");
+    box.innerHTML = `<div class="thread-empty">Loading…</div>`;
+    try {
+      const { data, error } = await sb.from("task_events").select("*").eq("task_id", taskId).order("created_at", { ascending: true });
+      if (error) throw error;
+      if (detailTaskId !== taskId) return;
+      if (!data || !data.length) { box.innerHTML = `<div class="thread-empty">No activity yet.</div>`; return; }
+      box.innerHTML = data.map(eventLine).join("");
+      box.scrollTop = box.scrollHeight;
+    } catch (e) { box.innerHTML = `<div class="thread-empty">Couldn't load activity.</div>`; }
+  }
+  async function sendDetailComment() {
+    const input = $("dThreadInput"); const body = input.value.trim();
+    if (!body || !detailTaskId) return;
+    input.value = "";
+    const { error } = await sb.from("task_events").insert({ task_id: detailTaskId, user_id: me.id, type: "comment", message: body });
+    if (error) { toast(error.message || "Couldn't post comment"); input.value = body; return; }
+    loadDetailThread(detailTaskId);
+  }
+  $("dThreadSend").addEventListener("click", sendDetailComment);
+  $("dThreadInput").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); sendDetailComment(); } });
+
+  $("dReassignSave").addEventListener("click", async () => {
+    if (!detailTaskId) return;
+    const ids = Array.from($("dAssignees").querySelectorAll("input:checked")).map((c) => c.value);
+    await setTaskAssignees(detailTaskId, ids);
+    toast("Assignment updated");
+    closeDetail();
+    rerender();
+  });
 
   // ============================================================
   //  Web Push notifications (device alerts)

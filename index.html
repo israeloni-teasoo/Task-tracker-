@@ -264,8 +264,14 @@
           <option value="medium">Medium</option>
           <option value="low">Low</option>
         </select>
-        <select class="filter-select" id="fltAssignee" aria-label="Filter by assignee"><option value="">All assignees</option></select>
-        <select class="filter-select" id="fltRequester" aria-label="Filter by requester"><option value="">All requesters</option></select>
+        <div class="ms" id="msAssignee">
+          <button type="button" class="filter-select ms-btn" data-ms="assignee">All assignees ▾</button>
+          <div class="ms-panel" hidden></div>
+        </div>
+        <div class="ms" id="msRequester">
+          <button type="button" class="filter-select ms-btn" data-ms="requester">All requesters ▾</button>
+          <div class="ms-panel" hidden></div>
+        </div>
         <select class="filter-select" id="fltDept" aria-label="Filter by department"><option value="">All departments</option></select>
         <select class="filter-select" id="fltDue" aria-label="Filter by due date">
           <option value="">Any date</option>
@@ -456,6 +462,33 @@
             <div class="setting-sub" id="settingsAcct"></div>
           </div>
           <button type="button" class="danger-btn" id="settingsSignOut">Sign out</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Task detail (staff dashboard) ===== -->
+  <div class="modal-overlay" id="detailOverlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dTitle">
+      <div class="modal-head">
+        <h3 id="dTitle">Task</h3>
+        <button class="icon-btn" id="dClose" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="dMeta" class="detail-meta"></div>
+        <div id="dNotes" class="detail-notes"></div>
+        <div class="task-section" id="dReassignSection" hidden>
+          <div class="task-section-head">Assign to</div>
+          <div id="dAssignees" class="check-group"></div>
+          <button type="button" class="ghost-btn" id="dReassignSave">Save assignment</button>
+        </div>
+        <div class="task-section">
+          <div class="task-section-head">Activity</div>
+          <div id="dThreadList" class="thread-list"></div>
+          <div class="thread-compose">
+            <input type="text" id="dThreadInput" placeholder="Write a comment…" maxlength="2000" />
+            <button type="button" class="primary-btn" id="dThreadSend">Send</button>
+          </div>
         </div>
       </div>
     </div>
