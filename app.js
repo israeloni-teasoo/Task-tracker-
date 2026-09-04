@@ -12,7 +12,13 @@
   const CFG = window.TASKTRACK_SUPABASE || {};
   const sb = (window.supabase && CFG.url)
     ? window.supabase.createClient(CFG.url, CFG.anonKey, {
-        auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+        auth: {
+          persistSession: true, autoRefreshToken: true, detectSessionInUrl: true,
+          // Implicit flow makes magic links self-contained (token in the URL),
+          // so an invite the Admin sends works on the invitee's OWN device.
+          // PKCE would store the verifier on the sender's device and fail here.
+          flowType: "implicit",
+        },
       })
     : null;
   const PROJECT_REF = (CFG.url || "").replace(/^https?:\/\//, "").split(".")[0];
