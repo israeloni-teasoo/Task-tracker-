@@ -466,7 +466,9 @@
   async function loadPeople() {
     if (!can.staff()) return;
     try {
-      const { data, error } = await sb.from("memberships").select("user_id, role, profiles(email, full_name, avatar_url)");
+      // `memberships` has two FKs to profiles (user_id + updated_by) so the embed
+      // MUST name the column, or PostgREST errors and the People list is empty.
+      const { data, error } = await sb.from("memberships").select("user_id, role, profiles:profiles!user_id(email, full_name, avatar_url)");
       if (error) throw error;
       people = (data || []).map((m) => ({
         userId: m.user_id, role: m.role,
@@ -2026,6 +2028,7 @@
       ["Notification prefs (018)", () => sb.from("notification_prefs").select("user_id").limit(1)],
       ["Remove/block users (023)", () => sb.from("blocked_users").select("user_id").limit(1)],
       ["Staff directory RPC (013/017)", () => sb.rpc("public_staff")],
+      ["People list loads", () => sb.from("memberships").select("user_id, profiles:profiles!user_id(email)").limit(1)],
     ];
     const rows = [];
     for (const [label, fn] of checks) {
