@@ -178,6 +178,17 @@ returns boolean language sql stable security definer set search_path = public as
   select public.app_current_role() in ('owner', 'delegate', 'editor', 'viewer');
 $$;
 
+-- Definer helpers so tasks_select can check assignment/recipiency WITHOUT
+-- triggering the join tables' RLS (which would recurse back into tasks).
+create or replace function public.is_assignee(p_task uuid, p_user uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.task_assignees where task_id = p_task and user_id = p_user);
+$$;
+create or replace function public.is_recipient(p_task uuid, p_user uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.task_recipients where task_id = p_task and user_id = p_user);
+$$;
+
 -- ---------- New-user bootstrap ----------
 -- On sign-up, create a profile and give the 'requester' role by default.
 create or replace function public.handle_new_user()
@@ -387,8 +398,8 @@ create policy tasks_select on public.tasks for select
   using (
     public.is_staff()
     or requester_id = auth.uid()
-    or exists (select 1 from public.task_assignees a where a.task_id = id and a.user_id = auth.uid())
-    or exists (select 1 from public.task_recipients r where r.task_id = id and r.user_id = auth.uid())
+    or public.is_assignee(id, auth.uid())
+    or public.is_recipient(id, auth.uid())
   );
 
 create policy tasks_insert_staff on public.tasks for insert
@@ -450,13 +461,11 @@ create policy att_meta_insert_staff on public.task_attachments for insert
 -- task_assignees / task_recipients: staff or the request owner may read;
 -- staff manage assignees (editor+) and recipients.
 create policy task_assignees_select on public.task_assignees for select
-  using (public.is_staff() or user_id = auth.uid()
-         or exists (select 1 from public.tasks t where t.id = task_id and t.requester_id = auth.uid()));
+  using (public.is_staff() or user_id = auth.uid());
 create policy task_assignees_write on public.task_assignees for all
   using (public.can_edit()) with check (public.can_edit());
 create policy task_recipients_select on public.task_recipients for select
-  using (public.is_staff() or user_id = auth.uid()
-         or exists (select 1 from public.tasks t where t.id = task_id and t.requester_id = auth.uid()));
+  using (public.is_staff() or user_id = auth.uid());
 create policy task_recipients_write on public.task_recipients for all
   using (public.is_staff()) with check (public.is_staff());
 
@@ -557,10 +566,12 @@ grant execute on function public.public_add_attachment(uuid, text, text, text, b
 create or replace function public.public_staff()
 returns table (id uuid, name text, role text)
 language sql security definer set search_path = public as $$
-  select p.id, coalesce(nullif(trim(p.full_name), ''), 'Staff member'), m.role::text
+  select p.id,
+         coalesce(nullif(trim(p.full_name), ''), p.email, 'Team member') as name,
+         m.role::text as role
     from public.memberships m join public.profiles p on p.id = m.user_id
-   where m.role in ('owner','delegate','editor','viewer')
-   order by case m.role when 'owner' then 0 when 'delegate' then 1 when 'editor' then 2 else 3 end, p.full_name nulls last;
+   order by case m.role when 'owner' then 0 when 'delegate' then 1 when 'editor' then 2
+                        when 'viewer' then 3 else 4 end, p.full_name nulls last;
 $$;
 grant execute on function public.public_staff() to anon, authenticated;
 
@@ -573,7 +584,7 @@ begin
   delete from public.task_recipients where task_id = tid;
   insert into public.task_recipients (task_id, user_id)
     select tid, u from unnest(ids) as u
-     where exists (select 1 from public.memberships m where m.user_id = u and m.role in ('owner','delegate','editor','viewer'))
+     where exists (select 1 from public.memberships m where m.user_id = u)
   on conflict do nothing;
   return true;
 end; $$;
