@@ -2062,18 +2062,20 @@
 
   // ---- Surface uncaught errors instead of failing silently ----
   const _seenErrors = new Set();
-  function surfaceError(msg) {
-    msg = String(msg || "Something went wrong").replace(/\s+/g, " ").slice(0, 160);
+  function surfaceError(raw) {
+    let msg = "";
+    if (raw && typeof raw === "object") msg = raw.message || raw.error_description || raw.msg || "";
+    else msg = String(raw || "");
+    msg = msg.replace(/\s+/g, " ").trim().slice(0, 160);
+    // Ignore empties and known-benign browser noise.
+    if (!msg || msg === "[object Object]" || /ResizeObserver|Script error\.?$/i.test(msg)) return;
     if (_seenErrors.has(msg)) return;
     _seenErrors.add(msg);
     console.error("[TaskTrack]", msg);
     try { if (toastEl) toast("⚠️ " + msg); } catch (e) {}
   }
-  window.addEventListener("error", (e) => surfaceError(e && (e.message || (e.error && e.error.message))));
-  window.addEventListener("unhandledrejection", (e) => {
-    const r = e && e.reason;
-    surfaceError(r && (r.message || r.error_description || r.msg) || r);
-  });
+  window.addEventListener("error", (e) => surfaceError(e && (e.error || e.message)));
+  window.addEventListener("unhandledrejection", (e) => surfaceError(e && e.reason));
 
   // ---- Go ----
   boot();
