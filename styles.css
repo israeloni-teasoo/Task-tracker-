@@ -174,6 +174,7 @@ body {
 .person-name { font-size: 13.5px; font-weight: 600; }
 .person-email { font-size: 12px; color: var(--c-text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .you-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: var(--c-accent); background: var(--c-accent-soft); padding: 1px 6px; border-radius: 10px; margin-left: 4px; }
+.you-tag.pending-tag { color: #d97706; background: rgba(245,158,11,.16); }
 .person-role { border: 1px solid var(--c-border); background: var(--c-surface-2); border-radius: 8px; padding: 6px 8px; font-size: 13px; font-family: inherit; color: var(--c-text); }
 
 /* ===== Requester portal ===== */

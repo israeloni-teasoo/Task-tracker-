@@ -1529,62 +1529,70 @@
       b.addEventListener("click", () => cancelInvite(b.dataset.cancel)));
   }
 
+  // Reload People + pending invites from the server and repaint.
+  async function refreshPeopleLists() {
+    await Promise.all([loadPeople(), loadInvites()]);
+    renderPeople(); renderInvites();
+  }
+
   $("inviteForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const email = $("inviteEmail").value.trim().toLowerCase();
     const role = $("inviteRole").value;
     if (!email) return;
-    // If they've already signed in, change their role directly instead.
-    const existing = people.find((p) => (p.email || "").toLowerCase() === email);
-    if (existing) {
-      await changeRole(existing.userId, role);
-      $("inviteEmail").value = "";
-      toast(`Role updated to ${ROLE_LABEL[role]}`);
-      return;
-    }
     const btn = e.target.querySelector('button[type="submit"]');
     if (btn) btn.disabled = true;
-    // 0) If they already have an account (e.g. a previously-removed user), just
-    // restore their membership + unblock — no need for a fresh magic link.
     try {
-      const { data: prof } = await sb.from("profiles").select("id").eq("email", email).maybeSingle();
-      if (prof && prof.id) {
-        await sb.from("blocked_users").delete().eq("user_id", prof.id);
-        const { error: mErr } = await sb.from("memberships").upsert(
-          { user_id: prof.id, role, updated_by: me.id, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
-        await sb.from("role_invites").delete().eq("email", email);
-        if (btn) btn.disabled = false;
-        if (mErr) { toast(mErr.message || "Couldn't re-add this person."); return; }
+      // Already an active member → just update their role.
+      const existing = people.find((p) => (p.email || "").toLowerCase() === email);
+      if (existing) {
+        await changeRole(existing.userId, role);
         $("inviteEmail").value = "";
-        await loadPeople(); renderPeople(); loadInvites();
-        toast(`${email} re-added as ${ROLE_LABEL[role]}`);
+        await refreshPeopleLists();
+        toast(`Role updated to ${ROLE_LABEL[role]}`);
         return;
       }
-    } catch (e2) { /* fall through to normal invite */ }
-    // 1) Record the chosen role (+ optional name) so sign-up applies them.
-    const { error: invErr } = await sb.from("role_invites").upsert(
-      { email, role, invited_by: me.id }, { onConflict: "email" });
-    if (invErr) { if (btn) btn.disabled = false; toast(invErr.message || "Couldn't save the invite — are you the Admin?"); return; }
-    // 2) Email a magic link that creates their account (needs sign-ups ON in Supabase).
-    const { error } = await sb.auth.signInWithOtp({
-      email, options: { shouldCreateUser: true, emailRedirectTo: location.origin + "/" },
-    });
-    if (btn) btn.disabled = false;
-    // Either way the role is saved; keep it on the pending list so it's visible.
-    invites = invites.filter((i) => i.email !== email).concat([{ email, role, created_at: new Date().toISOString() }]);
-    renderInvites();
-    if (error) {
-      const low = (error.message || "").toLowerCase();
-      if (low.includes("signups not allowed") || low.includes("not allowed") || low.includes("disabled"))
-        toast("Enable “Allow new users to sign up” in Supabase → Auth → Providers → Email, then invite again. The role is saved.");
-      else if (low.includes("rate limit"))
-        toast("Email rate limit hit — set up SMTP (see docs/AUTH.md), then re-invite. The role is saved.");
-      else toast(error.message || "Couldn't send the invite email. The role is saved.");
-      return;
+
+      // Record the intended role for when they accept.
+      const { error: invErr } = await sb.from("role_invites").upsert(
+        { email, role, invited_by: me.id }, { onConflict: "email" });
+      if (invErr) throw invErr;
+
+      // If they already have an account (e.g. someone removed earlier), unblock
+      // and set their membership directly — the sign-up trigger won't fire for an
+      // existing account, so the chosen role wouldn't stick otherwise.
+      const { data: prof } = await sb.from("profiles").select("id").ilike("email", email).maybeSingle();
+      if (prof && prof.id) {
+        await sb.from("blocked_users").delete().eq("user_id", prof.id);
+        await sb.from("memberships").upsert(
+          { user_id: prof.id, role, updated_by: me.id, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
+        await sb.from("role_invites").delete().eq("email", email);
+      }
+
+      // Always email a magic link (a login link for existing accounts, an
+      // account-creating link for new ones). Needs sign-ups ON in Supabase.
+      const { error: otpErr } = await sb.auth.signInWithOtp({
+        email, options: { shouldCreateUser: true, emailRedirectTo: location.origin + "/" },
+      });
+
+      $("inviteEmail").value = "";
+      await refreshPeopleLists();
+
+      if (otpErr) {
+        const low = (otpErr.message || "").toLowerCase();
+        if (low.includes("signups not allowed") || low.includes("not allowed") || low.includes("disabled"))
+          toast("Turn on “Allow new users to sign up” in Supabase → Auth → Providers → Email, then invite again. The role is saved.");
+        else if (low.includes("rate limit"))
+          toast("Email limit hit — set SMTP/Resend (docs/AUTH.md), then re-invite. The role is saved.");
+        else toast((otpErr.message || "Couldn't send the invite email") + " — the role is saved.");
+      } else {
+        toast(prof ? `${email} re-added and emailed a sign-in link` : `Invitation emailed to ${email} (${ROLE_LABEL[role]})`);
+      }
+    } catch (err) {
+      toast((err && err.message) || "Couldn't send the invite — are you the Admin?");
+    } finally {
+      if (btn) btn.disabled = false;
     }
-    $("inviteEmail").value = "";
-    toast(`Invitation emailed to ${email} (${ROLE_LABEL[role]})`);
-    loadInvites();
   });
 
   async function cancelInvite(email) {
@@ -1612,11 +1620,13 @@
         .filter((r) => r !== "owner" || iAmOwner)
         .map((r) => `<option value="${r}" ${p.role === r ? "selected" : ""}>${ROLE_LABEL[r]}</option>`).join("");
       const label = p.name || p.email || "Unknown";
+      // A member with no name hasn't completed their first sign-in yet.
+      const pending = !p.name ? ' <span class="you-tag pending-tag">not signed in yet</span>' : "";
       return `
         <div class="person-row">
           <div class="account-avatar">${esc((label[0] || "?").toUpperCase())}</div>
           <div class="person-info">
-            <span class="person-name">${esc(label)}${isMe ? ' <span class="you-tag">you</span>' : ""}</span>
+            <span class="person-name">${esc(label)}${isMe ? ' <span class="you-tag">you</span>' : ""}${pending}</span>
             <span class="person-email">${esc(p.email || "")}</span>
           </div>
           <select class="person-role" data-user="${p.userId}" ${canEditRow ? "" : "disabled"}>${opts}</select>
