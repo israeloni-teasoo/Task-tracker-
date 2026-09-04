@@ -140,14 +140,13 @@
     me = session.user;
     hide(authScreen); hide(bootEl);
 
-    // Removed people are signed out (their access has been revoked).
-    if (await isBlocked()) {
+    // Check the block-list and role in parallel (one round-trip of latency).
+    const [blocked] = await Promise.all([isBlocked(), loadRole()]);
+    if (blocked) {
       try { sessionStorage.setItem("tasktrack.removed", "1"); } catch (e) {}
       await sb.auth.signOut();   // triggers a reload via SIGNED_OUT
       return;
     }
-
-    await loadRole();
 
     // Invited users must create a password on first entry (so they're never
     // locked out next time). After it's set, this screen never shows again.
@@ -452,9 +451,10 @@
   }
   function isUnread(taskId) {
     const meta = commentMeta[taskId];
-    if (!meta || !meta.count) return false;
+    if (!meta || !meta.count || !meta.last) return false;
     const seen = readMap()[taskId];
-    return !seen || seen < meta.last;
+    // Compare as dates so different ISO encodings never mislead the lex/compare.
+    return !seen || new Date(seen).getTime() < new Date(meta.last).getTime();
   }
   function commentBadge(t) {
     const meta = commentMeta[t.id];
@@ -579,13 +579,15 @@
         .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, (p) => applyChange("task", p))
         .on("postgres_changes", { event: "*", schema: "public", table: "projects" }, (p) => applyChange("project", p))
         .on("postgres_changes", { event: "INSERT", schema: "public", table: "task_events" }, (p) => {
-          const tid = p.new && p.new.task_id;
-          // Keep the unread-comment badges live.
-          if (p.new && p.new.type === "comment" && tid) {
+          const ev = p.new, tid = ev && ev.task_id;
+          if (ev && ev.type === "comment" && tid) {
             const cur = commentMeta[tid] || { count: 0, last: "" };
             cur.count += 1;
-            if (!cur.last || p.new.created_at > cur.last) cur.last = p.new.created_at;
+            if (!cur.last || new Date(ev.created_at) > new Date(cur.last)) cur.last = ev.created_at;
             commentMeta[tid] = cur;
+            // My own comment, or a task I have open, counts as already read.
+            const openHere = (openTaskId === tid && overlay && !overlay.hidden) || (detailTaskId === tid && !$("detailOverlay").hidden);
+            if (ev.user_id === (me && me.id) || openHere) markCommentsRead(tid);
             rerender();
           }
           // Refresh whichever activity thread is open for this task (live).
@@ -597,7 +599,7 @@
         .on("postgres_changes", { event: "*", schema: "public", table: "memberships" }, () => {
           // Someone joined/left or a role changed.
           if (canManagePeople()) { loadPeople().then(() => { if (!$("peopleOverlay").hidden) renderPeople(); }); loadInvites(); }
-          if ($("rRecipients")) loadPortalRecipients();   // refresh the staff picker for everyone
+          if ($("portalScreen") && !$("portalScreen").hidden) loadPortalRecipients();   // refresh the picker only when the dashboard is shown
         })
         .subscribe();
     } catch (e) { /* realtime is best-effort */ }
@@ -1205,6 +1207,7 @@
     input.value = "";
     const { error } = await sb.from("task_events").insert({ task_id: openTaskId, user_id: me.id, type: "comment", message: body });
     if (error) { toast(error.message || "Couldn't post comment"); input.value = body; return; }
+    markCommentsRead(openTaskId);
     loadThread(openTaskId);
   }
   $("threadSend").addEventListener("click", sendComment);
@@ -1879,6 +1882,7 @@
     input.value = "";
     const { error } = await sb.from("task_events").insert({ task_id: detailTaskId, user_id: me.id, type: "comment", message: body });
     if (error) { toast(error.message || "Couldn't post comment"); input.value = body; return; }
+    markCommentsRead(detailTaskId);
     loadDetailThread(detailTaskId);
   }
   $("dThreadSend").addEventListener("click", sendDetailComment);
@@ -2061,18 +2065,20 @@
   }
 
   // ---- Surface uncaught errors instead of failing silently ----
-  const _seenErrors = new Set();
+  // Always log details to the console (for the developer); show the boss at most
+  // one calm, generic toast every 20s so transient library errors don't spam her.
+  let _lastErrToast = 0;
   function surfaceError(raw) {
     let msg = "";
     if (raw && typeof raw === "object") msg = raw.message || raw.error_description || raw.msg || "";
     else msg = String(raw || "");
-    msg = msg.replace(/\s+/g, " ").trim().slice(0, 160);
-    // Ignore empties and known-benign browser noise.
+    msg = msg.replace(/\s+/g, " ").trim();
     if (!msg || msg === "[object Object]" || /ResizeObserver|Script error\.?$/i.test(msg)) return;
-    if (_seenErrors.has(msg)) return;
-    _seenErrors.add(msg);
     console.error("[TaskTrack]", msg);
-    try { if (toastEl) toast("⚠️ " + msg); } catch (e) {}
+    const now = Date.now();
+    if (now - _lastErrToast < 20000) return;
+    _lastErrToast = now;
+    try { if (toastEl) toast("⚠️ Something didn't work — please try again."); } catch (e) {}
   }
   window.addEventListener("error", (e) => surfaceError(e && (e.error || e.message)));
   window.addEventListener("unhandledrejection", (e) => surfaceError(e && e.reason));
