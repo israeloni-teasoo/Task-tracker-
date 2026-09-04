@@ -22,8 +22,8 @@ project context._
 
 ## Roles (DB enum `app_role`)
 `owner`, `delegate`, `editor`, `viewer`, `requester`.
-- **`owner` is displayed as "Admin"** (display-only rename; the enum value is
-  still `owner`). The developer is the Admin / super-admin who assigns everyone.
+- **`owner` is displayed as "Admin"** and **`requester` as "Staff"** (display-only
+  renames; enum values unchanged). The developer is the Admin / super-admin.
 - **The boss = a `delegate`** whose profile name is **"Managing Partner"** (she
   sets this herself on the first-sign-in name+password screen).
 - First user to ever sign up becomes `owner` automatically.
@@ -81,7 +81,9 @@ the schema but are unused/harmless.
   - 010 rate-limit public nudge · 011 wire push · 012 assignee/due/comments/
     attachments · 013 multi-assignee + recipients + `public_staff` · 014 push to
     recipients + boss email · 015 invite-name + email label + assignee/recipient
-    task visibility · 016 delegate can manage people (not Admins).
+    task visibility · 016 delegate can manage people (not Admins) · 017 fix tasks
+    RLS infinite recursion (definer helpers) + public_staff email fallback · 018
+    notification_prefs (per-user push/email) · 019 new-request email via channel.
 - Notification config lives in the RLS-locked `public.app_settings`
   (`push_fn_url`, `push_webhook_secret`) — never in the repo.
 

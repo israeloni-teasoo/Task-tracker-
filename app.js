@@ -1392,11 +1392,11 @@
   function renderInvites() {
     const el = $("inviteList");
     if (!invites.length) { el.innerHTML = ""; return; }
-    el.innerHTML = invites.map((i) => `
+    el.innerHTML = `<p class="people-subhead">Pending invites</p>` + invites.map((i) => `
       <div class="invite-row">
         <span class="invite-email">${esc(i.email)}</span>
         <span class="invite-role-tag">${ROLE_LABEL[i.role] || i.role}</span>
-        <button class="row-edit" data-cancel="${esc(i.email)}" title="Cancel invite">✕</button>
+        <button class="ghost-btn danger-btn person-remove" data-cancel="${esc(i.email)}">Cancel</button>
       </div>`).join("");
     el.querySelectorAll("[data-cancel]").forEach((b) =>
       b.addEventListener("click", () => cancelInvite(b.dataset.cancel)));
