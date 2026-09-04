@@ -118,6 +118,11 @@ body {
 .auth-msg.ok { background: rgba(34,197,94,.12); color: #16a34a; }
 .auth-msg.err { background: rgba(239,68,68,.12); color: var(--s-blocked); }
 .auth-hint { font-size: 12px; color: var(--c-text-faint); text-align: center; margin: 0; }
+.pw-wrap { position: relative; display: flex; }
+.pw-wrap input { flex: 1; padding-right: 42px; }
+.pw-eye { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); border: none; background: none; cursor: pointer; font-size: 16px; padding: 4px 6px; opacity: .6; line-height: 1; }
+.pw-eye:hover { opacity: 1; }
+.pw-eye.on { opacity: 1; }
 .linklike { display: block; margin: -4px auto 0; border: none; background: none; padding: 4px; cursor: pointer; font: inherit; font-size: 13px; color: var(--c-accent); text-decoration: underline; }
 .linklike:hover { opacity: .8; }
 .track-link { margin-top: 12px; padding: 12px; border: 1px solid var(--c-border); border-radius: 10px; background: var(--c-bg); }

@@ -51,7 +51,10 @@
         </label>
         <label class="field" id="passwordField">
           <span>Password</span>
-          <input type="password" id="authPassword" placeholder="Your password" autocomplete="current-password" />
+          <div class="pw-wrap">
+            <input type="password" id="authPassword" placeholder="Your password" autocomplete="current-password" />
+            <button type="button" class="pw-eye" data-eye="authPassword" aria-label="Show password">👁</button>
+          </div>
         </label>
         <button type="submit" class="primary-btn wide" id="authSubmit">Sign in</button>
       </form>
@@ -78,11 +81,17 @@
         </label>
         <label class="field">
           <span>New password</span>
-          <input type="password" id="pwNew" required minlength="6" placeholder="At least 6 characters" autocomplete="new-password" />
+          <div class="pw-wrap">
+            <input type="password" id="pwNew" required minlength="6" placeholder="At least 6 characters" autocomplete="new-password" />
+            <button type="button" class="pw-eye" data-eye="pwNew" aria-label="Show password">👁</button>
+          </div>
         </label>
         <label class="field">
           <span>Confirm password</span>
-          <input type="password" id="pwNew2" required minlength="6" placeholder="Re-enter it" autocomplete="new-password" />
+          <div class="pw-wrap">
+            <input type="password" id="pwNew2" required minlength="6" placeholder="Re-enter it" autocomplete="new-password" />
+            <button type="button" class="pw-eye" data-eye="pwNew2" aria-label="Show password">👁</button>
+          </div>
         </label>
         <button type="submit" class="primary-btn wide" id="pwSetupSubmit">Save password &amp; continue</button>
       </form>
@@ -173,7 +182,11 @@
 
       <nav class="filters" aria-label="Filters">
         <p class="filters-label">Views</p>
-        <button class="filter-btn active" data-scope="all">
+        <button class="filter-btn active" data-scope="todo">
+          <span class="dot" style="background:#f59e0b"></span> To do
+          <span class="count" data-count="todo">0</span>
+        </button>
+        <button class="filter-btn" data-scope="all">
           <span class="dot" style="background:var(--c-accent)"></span> All tasks
           <span class="count" data-count="all">0</span>
         </button>
@@ -226,7 +239,7 @@
     <main class="main">
       <header class="topbar">
         <div class="topbar-left">
-          <h2 id="viewTitle">All tasks</h2>
+          <h2 id="viewTitle">To do</h2>
           <div class="view-toggle" role="tablist" aria-label="Layout">
             <button class="toggle-btn" data-view="board" role="tab">▦ Board</button>
             <button class="toggle-btn active" data-view="list" role="tab">☰ List</button>
@@ -273,7 +286,7 @@
 
     <!-- ===== Mobile bottom navigation ===== -->
     <nav class="mobile-nav" id="mobileNav" aria-label="Primary">
-      <button class="mnav-btn active" data-mscope="all">
+      <button class="mnav-btn active" data-mscope="todo">
         <span class="mnav-ico">🗒️</span><span class="mnav-label">Tasks</span>
       </button>
       <button class="mnav-btn" data-mscope="today">

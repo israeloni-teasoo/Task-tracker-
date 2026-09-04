@@ -613,6 +613,7 @@ alter publication supabase_realtime add table public.projects;
 alter publication supabase_realtime add table public.task_events;
 alter publication supabase_realtime add table public.task_assignees;
 alter publication supabase_realtime add table public.task_recipients;
+alter publication supabase_realtime add table public.memberships;
 
 -- ---------- Seed the starter projects ----------
 insert into public.projects (name, color, is_default, position) values

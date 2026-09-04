@@ -36,7 +36,7 @@
   let assigneesByTask = {}, recipientsByTask = {};   // task_id -> [user_id]
   let profilesById = {};
   let me = null, myRole = "requester";
-  let scope = "all", view = "list", query = "";
+  let scope = "todo", view = "list", query = "";
   let filters = { priority: "", assignee: "", requester: "", dept: "", due: "" };
   let appReady = false, realtimeChannel = null;
   const seenTaskIds = new Set();   // for "new request" toasts
@@ -229,6 +229,18 @@
   // Escape hatch from the mandatory password screen (wrong account, etc.).
   $("pwSetupSignOut").addEventListener("click", async () => { await sb.auth.signOut(); });
 
+  // Show/hide password toggles (all fields).
+  document.querySelectorAll(".pw-eye").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const inp = $(btn.dataset.eye);
+      if (!inp) return;
+      const show = inp.type === "password";
+      inp.type = show ? "text" : "password";
+      btn.classList.toggle("on", show);
+      btn.setAttribute("aria-label", show ? "Hide password" : "Show password");
+    });
+  });
+
   // ---- Login form ----
   let authMode = "password";   // "password" | "link"
 
@@ -400,6 +412,11 @@
       }));
       profilesById = {};
       people.forEach((p) => (profilesById[p.userId] = p));
+      // Drop any pending invite whose email is now an actual member.
+      const memberEmails = new Set(people.map((p) => (p.email || "").toLowerCase()).filter(Boolean));
+      const before = invites.length;
+      invites = invites.filter((i) => !memberEmails.has((i.email || "").toLowerCase()));
+      if (invites.length !== before && !$("peopleOverlay").hidden) renderInvites();
     } catch (e) { /* non-fatal */ }
   }
 
@@ -505,6 +522,10 @@
         })
         .on("postgres_changes", { event: "*", schema: "public", table: "task_assignees" }, () => { loadAssignees().then(rerender); })
         .on("postgres_changes", { event: "*", schema: "public", table: "task_recipients" }, () => { loadRecipients().then(rerender); })
+        .on("postgres_changes", { event: "*", schema: "public", table: "memberships" }, () => {
+          // Someone joined or a role changed → refresh People + prune stale invites.
+          if (canManagePeople()) { loadPeople().then(() => { if (!$("peopleOverlay").hidden) renderPeople(); }); loadInvites(); }
+        })
         .subscribe();
     } catch (e) { /* realtime is best-effort */ }
   }
@@ -576,6 +597,7 @@
   // ============================================================
   function visibleTasks() {
     return tasks.filter((t) => {
+      if (scope === "todo" && t.status === "completed") return false;
       if (scope === "mine" && !isMine(t)) return false;
       if (scope === "today" && dueState(t.due) !== "today") return false;
       if (scope === "overdue" && dueState(t.due) !== "overdue") return false;
@@ -715,15 +737,15 @@
   }
 
   function updateCounts() {
-    let today = 0, overdue = 0, attention = 0, completed = 0, mine = 0;
+    let today = 0, overdue = 0, attention = 0, completed = 0, mine = 0, todo = 0;
     tasks.forEach((t) => {
       const ds = dueState(t.due);
       if (ds === "today") today++; if (ds === "overdue") overdue++;
       if (t.needsAttention) attention++;
-      if (t.status === "completed") completed++;
+      if (t.status === "completed") completed++; else todo++;
       if (isMine(t)) mine++;
     });
-    setCount("all", tasks.length); setCount("today", today); setCount("mine", mine);
+    setCount("all", tasks.length); setCount("today", today); setCount("mine", mine); setCount("todo", todo);
     setCount("overdue", overdue); setCount("attention", attention); setCount("completed", completed);
     const badge = $("mAttnBadge");
     if (badge) { badge.textContent = attention; badge.hidden = attention === 0; }
@@ -1234,7 +1256,7 @@
 
   // ---- Mobile bottom nav + "More" sheet ----
   const moreSheet = $("moreSheet");
-  const SCOPE_TITLE = { all: "All tasks", today: "Due today", overdue: "Overdue", attention: "Needs attention", completed: "Completed log" };
+  const SCOPE_TITLE = { todo: "To do", all: "All tasks", today: "Due today", overdue: "Overdue", attention: "Needs attention", completed: "Completed log" };
   function openSheet() { renderSidebarProjects(); show(moreSheet); }
   function closeSheet() { if (moreSheet) moreSheet.hidden = true; }
 
