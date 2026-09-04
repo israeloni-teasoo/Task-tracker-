@@ -121,6 +121,14 @@ create table public.task_recipients (
   primary key (task_id, user_id)
 );
 
+-- Per-user notification channel preferences.
+create table public.notification_prefs (
+  user_id    uuid primary key references public.profiles(id) on delete cascade,
+  push       boolean not null default true,
+  email      boolean not null default true,
+  updated_at timestamptz not null default now()
+);
+
 -- Per-device Web Push subscriptions (one person can have several devices).
 create table public.push_subscriptions (
   id         uuid primary key default gen_random_uuid(),
@@ -311,21 +319,13 @@ create trigger task_events_nudge after insert on public.task_events
   for each row execute function public.flag_on_nudge();
 
 -- New office request → push owner/delegate + email the boss.
+-- New requests notify owner+delegate via send-push, which does BOTH push and
+-- email per each user's channel preferences.
 create or replace function public.on_new_request()
 returns trigger language plpgsql security definer set search_path = public as $$
-declare who text;
 begin
   if new.source = 'request' then
-    who := coalesce(
-      nullif(trim(new.requester_name), ''),
-      (select nullif(trim(full_name), '') from public.profiles where id = new.requester_id),
-      (select email from public.profiles where id = new.requester_id),
-      'A team member');
     perform public._fire_push(new.id, null);
-    perform public._fire_email_owner(
-      'New request from ' || who || ': ' || coalesce(new.title, '(untitled)'),
-      who || coalesce(' (' || new.requester_department || ')', '')
-        || ' submitted a request: ' || coalesce(new.title, ''));
   end if;
   return new;
 end; $$;
@@ -362,6 +362,7 @@ alter table public.reminders           enable row level security;
 alter table public.task_attachments    enable row level security;
 alter table public.task_assignees      enable row level security;
 alter table public.task_recipients     enable row level security;
+alter table public.notification_prefs  enable row level security;
 alter table public.app_settings        enable row level security;   -- no policies: server-only
 
 -- profiles: see your own; staff see everyone; you can edit your own.
@@ -471,6 +472,10 @@ create policy task_recipients_write on public.task_recipients for all
 
 -- push_subscriptions: you manage only your own devices.
 create policy push_own on public.push_subscriptions for all
+  using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+-- notification_prefs: each person manages their own channel preferences.
+create policy notif_prefs_own on public.notification_prefs for all
   using (user_id = auth.uid()) with check (user_id = auth.uid());
 
 -- reminders: staff (editor+) manage reminders.

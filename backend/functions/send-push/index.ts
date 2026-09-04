@@ -66,24 +66,47 @@ async function doPush(
   let msgTitle = title || "TaskTrack";
   let msgBody = body || "Something needs your attention.";
   if (task_id && !body) {
-    const { data: t } = await admin.from("tasks").select("title, source").eq("id", task_id).maybeSingle();
-    if (t) msgBody = t.source === "request" ? `New request: "${t.title}"` : `"${t.title}" needs your attention.`;
+    const { data: t } = await admin.from("tasks").select("title, source, requester_name").eq("id", task_id).maybeSingle();
+    if (t) {
+      msgBody = t.source === "request"
+        ? `New request${t.requester_name ? " from " + t.requester_name : ""}: "${t.title}"`
+        : `"${t.title}" needs your attention.`;
+    }
   }
 
-  const { data: subs } = await admin.from("push_subscriptions").select("*").in("user_id", ids);
-  const payload = JSON.stringify({ title: msgTitle, body: msgBody, url: "./", tag: task_id || "tasktrack" });
+  // Per-user channel preferences (default: both on if no row).
+  const { data: prefRows } = await admin.from("notification_prefs").select("user_id, push, email").in("user_id", ids);
+  const prefs: Record<string, { push: boolean; email: boolean }> = {};
+  (prefRows || []).forEach((r) => (prefs[r.user_id] = { push: r.push, email: r.email }));
+  const wantsPush = (id: string) => prefs[id] ? prefs[id].push : true;
+  const wantsEmail = (id: string) => prefs[id] ? prefs[id].email : true;
 
+  // ---- Push (to devices of users who allow push) ----
+  const pushIds = ids.filter(wantsPush);
   let sent = 0;
-  await Promise.all((subs || []).map(async (s) => {
-    try {
-      await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload);
-      sent++;
-    } catch (e: any) {
-      if (e && (e.statusCode === 404 || e.statusCode === 410)) {
-        await admin.from("push_subscriptions").delete().eq("endpoint", s.endpoint);
+  if (pushIds.length) {
+    const { data: subs } = await admin.from("push_subscriptions").select("*").in("user_id", pushIds);
+    const payload = JSON.stringify({ title: msgTitle, body: msgBody, url: "./", tag: task_id || "tasktrack" });
+    await Promise.all((subs || []).map(async (s) => {
+      try {
+        await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload);
+        sent++;
+      } catch (e: any) {
+        if (e && (e.statusCode === 404 || e.statusCode === 410)) {
+          await admin.from("push_subscriptions").delete().eq("endpoint", s.endpoint);
+        }
       }
-    }
-  }));
+    }));
+  }
+
+  // ---- Email (to users who allow the email channel) ----
+  const emailIds = ids.filter(wantsEmail);
+  if (emailIds.length && RESEND_API_KEY) {
+    const { data: people } = await admin.from("profiles").select("email").in("id", emailIds);
+    await Promise.all((people || [])
+      .filter((p) => p.email)
+      .map((p) => sendEmail(p.email, msgTitle === "TaskTrack" ? msgBody.slice(0, 80) : msgTitle, msgBody)));
+  }
   return sent;
 }
 

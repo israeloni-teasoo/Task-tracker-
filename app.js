@@ -29,7 +29,7 @@
   ];
   const statusLabel = (k) => (STATUSES.find((s) => s.key === k) || {}).label || k;
   const PALETTE = ["#3b82f6", "#a855f7", "#22c55e", "#f59e0b", "#ef4444", "#14b8a6", "#ec4899", "#6366f1"];
-  const ROLE_LABEL = { owner: "Admin", delegate: "Delegate", editor: "Editor", viewer: "Viewer", requester: "Requester" };
+  const ROLE_LABEL = { owner: "Admin", delegate: "Delegate", editor: "Editor", viewer: "Viewer", requester: "Staff" };
 
   // ---- State ----
   let projects = [], tasks = [], people = [];
@@ -322,7 +322,12 @@
   $("setPwBtn").addEventListener("click", setPassword);
 
   // ---- Settings modal ----
-  function openSettings() { closeSheet && closeSheet(); reflectNotifState(); show($("settingsOverlay")); }
+  function openSettings() {
+    if (typeof closeSheet === "function") closeSheet();
+    if ($("settingsAcct")) $("settingsAcct").textContent = (me && me.email) || "";
+    reflectNotifState();
+    show($("settingsOverlay"));
+  }
   function closeSettings() { hide($("settingsOverlay")); }
   $("settingsBtn").addEventListener("click", openSettings);
   $("closeSettings").addEventListener("click", closeSettings);
@@ -1452,26 +1457,35 @@
   $("portalSignOut").addEventListener("click", async () => { await sb.auth.signOut(); });
   if ($("portalSettings")) $("portalSettings").addEventListener("click", openSettings);
 
-  // Populate the "Who is this for?" picker in the logged-in requester portal.
+  // Populate the "Who is this for?" picker in the staff dashboard.
   async function loadPortalRecipients() {
     const box = $("rRecipients");
     if (!box) return;
     try {
       const { data } = await sb.rpc("public_staff");
-      const staff = data || [];
-      if (!staff.length) { box.innerHTML = `<span class="check-empty">No staff listed yet — your request goes to the whole office.</span>`; return; }
-      box.innerHTML = staff.map((s) => {
-        const tag = s.role === "owner" ? " · Admin" : "";
+      const staff = (data || []).filter((s) => s.id !== (me && me.id));   // not yourself
+      const everyone = `<label class="check-item everyone"><input type="checkbox" id="rEveryone" /> <span><strong>Everyone</strong> · the whole team</span></label>`;
+      const rows = staff.map((s) => {
+        const tag = s.role === "owner" ? " · Admin" : s.role === "delegate" ? " · Managing Partner" : "";
         return `<label class="check-item"><input type="checkbox" value="${esc(s.id)}" /> <span>${esc(s.name)}<small class="check-tag">${esc(tag)}</small></span></label>`;
       }).join("");
-    } catch (e) { box.innerHTML = `<span class="check-empty">Couldn't load staff — your request goes to the whole team.</span>`; }
+      box.innerHTML = everyone + (rows || `<span class="check-empty">No colleagues to list yet.</span>`);
+      // "Everyone" disables the individual picks (it means the whole team).
+      const ev = $("rEveryone");
+      if (ev) ev.addEventListener("change", () => {
+        box.querySelectorAll('input[type="checkbox"]:not(#rEveryone)').forEach((c) => {
+          c.disabled = ev.checked; if (ev.checked) c.checked = false;
+        });
+      });
+    } catch (e) { box.innerHTML = `<span class="check-empty">Couldn't load the team — your request goes to everyone.</span>`; }
   }
 
   $("requestForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const title = $("rTitle").value.trim();
     if (!title) return;
-    const recipientIds = Array.from(document.querySelectorAll('#rRecipients input:checked')).map((c) => c.value);
+    // "Everyone" (or nothing) → no specific recipients (goes to the whole team).
+    const recipientIds = Array.from(document.querySelectorAll('#rRecipients input[type="checkbox"]:checked:not(#rEveryone)')).map((c) => c.value).filter(Boolean);
     const row = {
       title, notes: $("rNotes").value.trim(), due: fromInputDateTime($("rDue").value) || null,
       priority: $("rPriority").value, status: "pending", source: "request",
@@ -1594,45 +1608,64 @@
     return ("serviceWorker" in navigator) && ("PushManager" in window) && ("Notification" in window) && !!CFG.vapidPublicKey;
   }
 
+  let notifPrefs = { push: true, email: true };
+
+  async function loadNotifPrefs() {
+    try {
+      const { data } = await sb.from("notification_prefs").select("push, email").eq("user_id", me.id).maybeSingle();
+      if (data) notifPrefs = { push: data.push, email: data.email };
+    } catch (e) { /* defaults */ }
+  }
+  async function saveNotifPrefs() {
+    try {
+      await sb.from("notification_prefs").upsert(
+        { user_id: me.id, push: notifPrefs.push, email: notifPrefs.email, updated_at: new Date().toISOString() },
+        { onConflict: "user_id" });
+    } catch (e) { /* best-effort */ }
+  }
+
   function setupNotifications() {
-    reflectNotifState();
-    if (!notifSupported() || !can.staff()) return;
-    if (Notification.permission === "granted") { ensureSubscribed(); return; }
-    // On by default: ask once automatically the first time a staff member enters
-    // (harmless if the browser requires a gesture — the Settings toggle remains).
-    if (Notification.permission === "default") {
-      let asked = false;
-      try { asked = !!localStorage.getItem("tasktrack.notifAsked"); } catch (e) {}
-      if (!asked) {
-        try { localStorage.setItem("tasktrack.notifAsked", "1"); } catch (e) {}
-        enableNotifications(true);
-      }
-    }
+    loadNotifPrefs().then(reflectNotifState);
+    if (!notifSupported()) return;
+    // On by default: if the pref says push and permission is already granted,
+    // make sure this device is subscribed.
+    if (notifPrefs.push && Notification.permission === "granted") ensureSubscribed();
   }
 
-  async function enableNotifications(silent) {
-    if (!notifSupported()) { if (!silent) toast("This browser can't do device notifications"); return; }
+  async function turnPushOn() {
+    if (!notifSupported()) { toast("This browser can't do device notifications"); reflectNotifState(); return; }
     let perm;
-    try { perm = await Notification.requestPermission(); } catch (e) { return; }
-    if (perm !== "granted") { if (!silent) toast("Allow notifications in your browser to turn them on"); reflectNotifState(); return; }
+    try { perm = await Notification.requestPermission(); } catch (e) { reflectNotifState(); return; }
+    if (perm !== "granted") { toast("Allow notifications in your browser to turn them on"); reflectNotifState(); return; }
     await ensureSubscribed();
+    notifPrefs.push = true; await saveNotifPrefs();
     reflectNotifState();
-    if (!silent) toast("Notifications on for this device");
+    toast("Push notifications on");
+  }
+  async function turnPushOff() {
+    await unsubscribeDevice();
+    notifPrefs.push = false; await saveNotifPrefs();
+    reflectNotifState();
+    toast("Push notifications off");
   }
 
-  // Keep the Settings row + mobile button in sync with the browser's state.
+  // Reflect prefs + browser state into the Settings toggles.
   function reflectNotifState() {
-    const supported = notifSupported() && can.staff();
+    const supported = notifSupported();
     const perm = ("Notification" in window) ? Notification.permission : "unsupported";
-    const status = $("notifStatus"), btn = $("notifBtn"), mBtn = $("mNotifBtn");
+    const pushOn = supported && perm === "granted" && notifPrefs.push;
+    const pushT = $("notifPushToggle"), emailT = $("notifEmailToggle"), status = $("notifStatus");
+    if (pushT) { pushT.checked = pushOn; pushT.disabled = !supported || perm === "denied"; }
+    if (emailT) emailT.checked = !!notifPrefs.email;
     if (status) {
-      status.textContent = !supported ? "Not available for your role on this device."
-        : perm === "granted" ? "On — you'll get a push when a reminder comes in."
-        : perm === "denied" ? "Blocked in your browser. Allow notifications in site settings to turn on."
-        : "Get a push on this device when a reminder comes in.";
+      status.textContent = !supported ? "This browser can't show notifications."
+        : perm === "denied" ? "Blocked in your browser — allow notifications in site settings first."
+        : pushOn ? "On for this device."
+        : "Off on this device.";
     }
-    if (btn) { btn.hidden = !supported || perm === "granted" || perm === "denied"; btn.onclick = () => enableNotifications(false); }
-    if (mBtn) { mBtn.hidden = !supported || perm !== "default"; mBtn.onclick = () => { if (typeof closeSheet === "function") closeSheet(); enableNotifications(false); }; }
+    // legacy mobile button (if present) mirrors the push state
+    const mBtn = $("mNotifBtn");
+    if (mBtn) mBtn.hidden = true;
   }
 
   async function ensureSubscribed() {
@@ -1652,6 +1685,27 @@
       );
     } catch (e) { console.warn("Push subscribe failed:", e); }
   }
+
+  async function unsubscribeDevice() {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) {
+        try { await sb.from("push_subscriptions").delete().eq("endpoint", sub.endpoint); } catch (e) {}
+        await sub.unsubscribe();
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  // Settings toggle wiring.
+  if ($("notifPushToggle")) $("notifPushToggle").addEventListener("change", (e) => {
+    if (e.target.checked) turnPushOn(); else turnPushOff();
+  });
+  if ($("notifEmailToggle")) $("notifEmailToggle").addEventListener("change", async (e) => {
+    notifPrefs.email = e.target.checked; await saveNotifPrefs();
+    toast(e.target.checked ? "Email notifications on" : "Email notifications off");
+  });
+  if ($("settingsSignOut")) $("settingsSignOut").addEventListener("click", async () => { await sb.auth.signOut(); });
 
   function urlB64ToUint8(base64) {
     const pad = "=".repeat((4 - (base64.length % 4)) % 4);

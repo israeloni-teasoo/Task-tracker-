@@ -375,13 +375,23 @@
         <button class="icon-btn" id="closeSettings" aria-label="Close">✕</button>
       </div>
       <div class="modal-body">
+        <p class="settings-section-label">Notifications</p>
         <div class="setting-row">
           <div class="setting-text">
-            <div class="setting-name">Device notifications</div>
-            <div class="setting-sub" id="notifStatus">Get a push on this device when a reminder comes in.</div>
+            <div class="setting-name">Push on this device</div>
+            <div class="setting-sub" id="notifStatus">Get a push when something's assigned or a reminder comes in.</div>
           </div>
-          <button type="button" class="primary-btn" id="notifBtn">Turn on</button>
+          <label class="switch"><input type="checkbox" id="notifPushToggle" /><span class="slider"></span></label>
         </div>
+        <div class="setting-row">
+          <div class="setting-text">
+            <div class="setting-name">Email</div>
+            <div class="setting-sub">Also send these notifications to your email.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="notifEmailToggle" /><span class="slider"></span></label>
+        </div>
+
+        <p class="settings-section-label">Account</p>
         <div class="setting-row">
           <div class="setting-text">
             <div class="setting-name">Password</div>
@@ -398,6 +408,13 @@
             <button type="button" class="ghost-btn" id="exportBtn">⬇ Export</button>
             <button type="button" class="ghost-btn" id="importBtn">⬆ Import</button>
           </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-text">
+            <div class="setting-name">Sign out</div>
+            <div class="setting-sub" id="settingsAcct"></div>
+          </div>
+          <button type="button" class="danger-btn" id="settingsSignOut">Sign out</button>
         </div>
       </div>
     </div>
@@ -420,7 +437,7 @@
             <option value="delegate">Delegate</option>
             <option value="editor">Editor</option>
             <option value="viewer">Viewer</option>
-            <option value="requester" selected>Requester</option>
+            <option value="requester" selected>Staff</option>
           </select>
           <button type="submit" class="primary-btn">Add</button>
         </form>

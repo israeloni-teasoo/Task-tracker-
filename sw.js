@@ -1,6 +1,6 @@
 /* TaskTrack service worker — offline support.
    Bump CACHE version whenever the cached files change so clients update. */
-const CACHE = "tasktrack-v16";
+const CACHE = "tasktrack-v17";
 // App-shell files served network-first so updates reach clients immediately when
 // online (fall back to cache when offline). Everything else is cache-first.
 const CORE = ["/", "/index.html", "/app.js", "/styles.css",
