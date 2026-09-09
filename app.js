@@ -69,6 +69,7 @@
     assigneeId: r.assignee_id || "",
     source: r.source, requesterId: r.requester_id, needsAttention: !!r.needs_attention,
     requesterName: r.requester_name || "", requesterDept: r.requester_department || "",
+    createdBy: r.created_by || "",
     created: r.created_at,
   });
   const rowFromTask = (t) => ({
@@ -674,8 +675,8 @@
   // ============================================================
   function visibleTasks() {
     return tasks.filter((t) => {
-      if (scope === "todo" && t.status === "completed") return false;
-      if (scope === "mine" && !isMine(t)) return false;
+      if (scope === "todo" && (t.status === "completed" || !isForMe(t))) return false;
+      if (scope === "mine" && !isForMe(t)) return false;
       if (scope === "today" && dueState(t.due) !== "today") return false;
       if (scope === "overdue" && dueState(t.due) !== "overdue") return false;
       if (scope === "attention" && !t.needsAttention) return false;
@@ -842,8 +843,10 @@
       const ds = dueState(t.due);
       if (ds === "today") today++; if (ds === "overdue") overdue++;
       if (t.needsAttention) attention++;
-      if (t.status === "completed") completed++; else todo++;
-      if (isMine(t)) mine++;
+      const forMe = isForMe(t);
+      if (t.status !== "completed" && forMe) todo++;
+      if (t.status === "completed") completed++;
+      if (forMe) mine++;
     });
     setCount("all", tasks.length); setCount("today", today); setCount("mine", mine); setCount("todo", todo);
     setCount("overdue", overdue); setCount("attention", attention); setCount("completed", completed);
@@ -864,6 +867,14 @@
     const uid = me && me.id;
     if (!uid) return false;
     return (assigneesByTask[t.id] || []).includes(uid) || (recipientsByTask[t.id] || []).includes(uid);
+  }
+  // "For me" = assigned/directed to me, OR a personal task I created that isn't
+  // delegated to anyone else. Used for the personal "To do" + "My tasks" views.
+  function isForMe(t) {
+    const uid = me && me.id;
+    if (!uid) return false;
+    if (isMine(t)) return true;
+    return t.createdBy === uid && (assigneesByTask[t.id] || []).length === 0;
   }
   const nameOf = (id) => { const p = profilesById[id]; return p ? (p.name || p.email || "User") : "User"; };
   function multiLabel(ids) {

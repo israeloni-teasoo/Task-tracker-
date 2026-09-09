@@ -34,8 +34,11 @@ project context._
   person sets their own name on first sign-in.
 
 ### What each role sees (routing in `continueIntoApp`)
-- **owner + delegate → full app** (Kanban board + list of ALL tasks, projects,
-  People & roles, Settings).
+- **owner + delegate → full app** (Kanban board + list, projects, People &
+  roles, Settings). The default **To do** view is PERSONAL — only tasks
+  assigned/directed to them or that they created for themselves (unassigned);
+  the **All tasks** view is the office-wide list of everyone's tasks. `isForMe()`
+  drives To do / My tasks; `isMine()` = assignee/recipient only.
 - **editor / viewer / requester → personal dashboard** (`#portalScreen`):
   "Assigned to me" (editors can change status there), a request form, and
   "My requests". They do NOT see the full team board.
