@@ -165,6 +165,41 @@ create table public.app_settings (
   value text
 );
 
+-- ---------- Google Calendar sync (migration 024) ----------
+-- The refresh token lives here and is NEVER client-readable (no RLS policies;
+-- only the google-calendar Edge Function, via the service role, touches it).
+create table public.google_accounts (
+  user_id       uuid primary key references public.profiles(id) on delete cascade,
+  email         text,
+  refresh_token text not null,
+  calendar_id   text not null default 'primary',
+  sync_token    text,
+  connected_at  timestamptz not null default now()
+);
+create table public.google_oauth_states (
+  state      uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references public.profiles(id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+create table public.google_calendar_events (
+  user_id    uuid not null references public.profiles(id) on delete cascade,
+  event_id   text not null,
+  summary    text,
+  starts_at  timestamptz,
+  ends_at    timestamptz,
+  all_day    boolean not null default false,
+  html_link  text,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, event_id)
+);
+create table public.task_gcal_links (
+  task_id         uuid primary key references public.tasks(id) on delete cascade,
+  user_id         uuid not null references public.profiles(id) on delete cascade,
+  google_event_id text not null,
+  calendar_id     text not null default 'primary',
+  updated_at      timestamptz not null default now()
+);
+
 -- ---------- Role helper functions ----------
 -- security definer so they read `memberships` without tripping RLS recursion.
 
@@ -195,6 +230,16 @@ create or replace function public.is_staff()
 returns boolean language sql stable security definer set search_path = public as $$
   select public.app_current_role() in ('owner', 'delegate', 'editor', 'viewer');
 $$;
+
+-- Google connection status (safe: returns email + bool, never the refresh token).
+create or replace function public.google_connection()
+returns table(connected boolean, email text)
+language sql stable security definer set search_path = public as $$
+  select
+    exists(select 1 from public.google_accounts g where g.user_id = auth.uid()),
+    (select g.email from public.google_accounts g where g.user_id = auth.uid());
+$$;
+grant execute on function public.google_connection() to authenticated;
 
 -- Definer helpers so tasks_select can check assignment/recipiency WITHOUT
 -- triggering the join tables' RLS (which would recurse back into tasks).
@@ -382,6 +427,10 @@ alter table public.task_recipients     enable row level security;
 alter table public.notification_prefs  enable row level security;
 alter table public.blocked_users       enable row level security;
 alter table public.app_settings        enable row level security;   -- no policies: server-only
+alter table public.google_accounts      enable row level security;   -- no policies: server-only (holds refresh token)
+alter table public.google_oauth_states  enable row level security;   -- no policies: server-only
+alter table public.task_gcal_links       enable row level security;   -- no policies: server-only
+alter table public.google_calendar_events enable row level security;
 
 -- profiles: any signed-in colleague can read names/emails (for comment authors,
 -- assignees, recipients); you can edit only your own.
@@ -491,6 +540,10 @@ create policy blocked_self_select on public.blocked_users for select
 create policy blocked_manage on public.blocked_users for all
   using (public.is_owner() or public.app_current_role() = 'delegate')
   with check (public.is_owner() or public.app_current_role() = 'delegate');
+
+-- google_calendar_events: owner sees their own; Admin + delegates (MP + PA) see all.
+create policy gcal_events_read on public.google_calendar_events for select
+  using (user_id = auth.uid() or public.is_owner() or public.app_current_role() = 'delegate');
 
 -- reminders: staff (editor+) manage reminders.
 create policy reminders_staff on public.reminders for all

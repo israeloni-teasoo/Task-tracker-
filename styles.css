@@ -327,6 +327,7 @@ body {
   cursor: pointer; font-size: 13px; font-weight: 600; font-family: inherit;
 }
 .danger-btn:hover { background: rgba(239, 68, 68, .1); }
+.ghost-btn.danger-outline { color: var(--s-blocked); border-color: var(--s-blocked); }
 
 .icon-btn {
   background: transparent; border: none; cursor: pointer;
@@ -545,6 +546,8 @@ body {
 .cal-chip:hover { background: var(--c-accent-soft); }
 .cal-chip.prio-high { border-left-color: var(--p-high); }
 .cal-chip.prio-medium { border-left-color: var(--p-medium); }
+.cal-chip.gcal { border-left-color: #4285f4; background: transparent; text-decoration: none; }
+.cal-chip.gcal:hover { background: rgba(66, 133, 244, .1); }
 .cal-chip.done { opacity: .55; }
 .cal-chip.done .cal-chip-title { text-decoration: line-through; }
 .cal-chip-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }

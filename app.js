@@ -45,6 +45,7 @@
   let me = null, myRole = "requester";
   let scope = "todo", view = "list", query = "";
   let calMode = "month", calDate = new Date(), calFrom = "", calTo = "";
+  let gcalConnected = false, gcalEvents = [];
   let filters = { priority: "", assignee: [], requester: [], dept: "", due: "" };
   let appReady = false, realtimeChannel = null;
   const seenTaskIds = new Set();   // for "new request" toasts
@@ -102,6 +103,7 @@
     if (/type=recovery/.test(location.hash) || /type=recovery/.test(location.search)) return;
     if (session) await enterApp(session);
     else showAuth();
+    handleGcalReturn();   // toast + clean URL if we just came back from Google
   }
 
   function show(el) { if (el) el.hidden = false; }
@@ -188,6 +190,7 @@
       render();
       setupNotifications();
       maybeOfferLocalUpload();
+      checkGcalConnection();   // reflect + pull Google events if connected
     });
   }
 
@@ -369,6 +372,7 @@
     if (typeof closeSheet === "function") closeSheet();
     if ($("settingsAcct")) $("settingsAcct").textContent = (me && me.email) || "";
     reflectNotifState();
+    reflectGcal();
     show($("settingsOverlay"));
   }
   function closeSettings() { hide($("settingsOverlay")); }
@@ -1008,12 +1012,31 @@
       </button>`;
   }
 
+  // Google Calendar events overlaid on the grid (read-only, open in Google).
+  function gcalByDay() {
+    const map = {};
+    gcalEvents.forEach((e) => {
+      const d = new Date(e.start);
+      if (isNaN(d)) return;
+      (map[dayKey(d)] = map[dayKey(d)] || []).push(e);
+    });
+    return map;
+  }
+  function gcalChip(e) {
+    const d = new Date(e.start);
+    const time = (!e.allDay && !isNaN(d)) ? d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : "";
+    return `<a class="cal-chip gcal" href="${esc(e.link || "#")}" target="_blank" rel="noopener" title="Google: ${esc(e.summary)}${time ? " · " + time : ""}">
+        <span class="cal-chip-dot" style="background:#4285f4"></span>${time ? `<span class="cal-chip-time">${time}</span>` : ""}<span class="cal-chip-title">${esc(e.summary)}</span>
+      </a>`;
+  }
+
   function renderCalendar() {
     const body = $("calBody"), label = $("calLabel"), custom = $("calCustom");
     if (!body) return;
     document.querySelectorAll(".cal-mode-btn").forEach((b) => b.classList.toggle("active", b.dataset.cal === calMode));
     if (custom) custom.hidden = calMode !== "custom";
     const byDay = tasksByDay();
+    const gByDay = gcalByDay();
 
     if (calMode === "month") {
       const first = new Date(calDate.getFullYear(), calDate.getMonth(), 1);
@@ -1022,17 +1045,17 @@
       const weeks = [];
       for (let w = 0; w < 6; w++) weeks.push(Array.from({ length: 7 }, (_, i) => addDays(gridStart, w * 7 + i)));
       const head = WEEKDAYS.map((d) => `<div class="cal-dow">${d}</div>`).join("");
-      const cells = weeks.flat().map((d) => calDayCell(d, byDay, d.getMonth() !== calDate.getMonth())).join("");
+      const cells = weeks.flat().map((d) => calDayCell(d, byDay, gByDay, d.getMonth() !== calDate.getMonth())).join("");
       body.innerHTML = `<div class="cal-month"><div class="cal-dow-row">${head}</div><div class="cal-grid">${cells}</div></div>`;
     } else if (calMode === "week") {
       const weekStart = addDays(startOfDay(calDate), -calDate.getDay());
       const weekEnd = addDays(weekStart, 6);
       label.textContent = `${weekStart.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${weekEnd.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
       const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-      body.innerHTML = `<div class="cal-cols">${days.map((d) => calDayColumn(d, byDay)).join("")}</div>`;
+      body.innerHTML = `<div class="cal-cols">${days.map((d) => calDayColumn(d, byDay, gByDay)).join("")}</div>`;
     } else if (calMode === "day") {
       label.textContent = calDate.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
-      body.innerHTML = `<div class="cal-cols cal-cols-1">${calDayColumn(calDate, byDay)}</div>`;
+      body.innerHTML = `<div class="cal-cols cal-cols-1">${calDayColumn(calDate, byDay, gByDay)}</div>`;
     } else { // custom range
       const from = calFrom ? parseDayKey(calFrom) : startOfDay(calDate);
       const to = calTo ? parseDayKey(calTo) : from;
@@ -1043,36 +1066,44 @@
       const days = Array.from({ length: span + 1 }, (_, i) => addDays(from, i));
       body.innerHTML = `<div class="cal-list">${days.map((d) => {
         const items = byDay[dayKey(d)] || [];
-        if (!items.length) return "";
-        return `<div class="cal-list-day"><div class="cal-list-date">${d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}</div><div class="cal-list-items">${items.map(calTaskChip).join("")}</div></div>`;
+        const gitems = gByDay[dayKey(d)] || [];
+        if (!items.length && !gitems.length) return "";
+        return `<div class="cal-list-day"><div class="cal-list-date">${d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}</div><div class="cal-list-items">${items.map(calTaskChip).join("")}${gitems.map(gcalChip).join("")}</div></div>`;
       }).join("") || `<div class="empty-state"><p>Nothing scheduled in this range.</p></div>`}</div>`;
     }
     wireCalendar();
   }
 
-  function calDayCell(d, byDay, muted) {
+  function calDayCell(d, byDay, gByDay, muted) {
     const items = byDay[dayKey(d)] || [];
+    const gitems = gByDay[dayKey(d)] || [];
     const isToday = dayKey(d) === dayKey(new Date());
-    const shown = items.slice(0, 4).map(calTaskChip).join("");
-    const more = items.length > 4 ? `<button class="cal-more" data-day="${dayKey(d)}">+${items.length - 4} more</button>` : "";
+    const chips = items.map(calTaskChip).concat(gitems.map(gcalChip));
+    const shown = chips.slice(0, 4).join("");
+    const more = chips.length > 4 ? `<button class="cal-more" data-day="${dayKey(d)}">+${chips.length - 4} more</button>` : "";
     return `<div class="cal-cell ${muted ? "muted" : ""} ${isToday ? "today" : ""}" data-day="${dayKey(d)}">
         <div class="cal-cell-num">${d.getDate()}</div>
         <div class="cal-cell-items">${shown}${more}</div>
       </div>`;
   }
 
-  function calDayColumn(d, byDay) {
+  function calDayColumn(d, byDay, gByDay) {
     const items = byDay[dayKey(d)] || [];
+    const gitems = (gByDay && gByDay[dayKey(d)]) || [];
     const isToday = dayKey(d) === dayKey(new Date());
+    const chips = items.map(calTaskChip).concat(gitems.map(gcalChip)).join("");
     return `<div class="cal-col ${isToday ? "today" : ""}" data-day="${dayKey(d)}">
         <div class="cal-col-head">${d.toLocaleDateString(undefined, { weekday: "short" })} <strong>${d.getDate()}</strong></div>
-        <div class="cal-col-body">${items.length ? items.map(calTaskChip).join("") : `<div class="cal-col-empty">—</div>`}</div>
+        <div class="cal-col-body">${chips || `<div class="cal-col-empty">—</div>`}</div>
       </div>`;
   }
 
   function wireCalendar() {
-    calendarView.querySelectorAll(".cal-chip").forEach((c) =>
+    // Task chips open the editor; Google chips (.gcal <a>) just follow their link.
+    calendarView.querySelectorAll(".cal-chip:not(.gcal)").forEach((c) =>
       c.addEventListener("click", (e) => { e.stopPropagation(); openModal(c.dataset.id); }));
+    calendarView.querySelectorAll(".cal-chip.gcal").forEach((c) =>
+      c.addEventListener("click", (e) => { e.stopPropagation(); }));
     // Clicking an empty spot in a day opens a new task prefilled to that date.
     calendarView.querySelectorAll(".cal-cell, .cal-col").forEach((cell) =>
       cell.addEventListener("click", (e) => {
@@ -1093,6 +1124,96 @@
     else if (calMode === "week") calDate = addDays(calDate, dir * 7);
     else calDate = addDays(calDate, dir);
     renderCalendar();
+  }
+
+  // ============================================================
+  //  Google Calendar sync (Edge Function: google-calendar)
+  // ============================================================
+  function reflectGcal() {
+    const btn = $("gcalConnectBtn"), status = $("gcalStatus");
+    if (!btn) return;
+    if (gcalConnected) {
+      btn.textContent = "Disconnect";
+      btn.classList.add("danger-outline");
+      if (status) status.textContent = "Connected. Your Google events show in the calendar view; tasks with a due date sync to Google.";
+    } else {
+      btn.textContent = "Connect";
+      btn.classList.remove("danger-outline");
+      if (status) status.textContent = "See your Google events in the calendar view; tasks with a due date sync back to Google.";
+    }
+  }
+  async function checkGcalConnection() {
+    if (!sb) return;
+    try {
+      const { data, error } = await sb.rpc("google_connection");
+      if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : data;
+      gcalConnected = !!(row && row.connected);
+    } catch (e) { gcalConnected = false; }
+    reflectGcal();
+    if (gcalConnected) pullGcalEvents();
+  }
+  async function connectGcal() {
+    try {
+      const { data, error } = await sb.functions.invoke("google-calendar", { body: { action: "start" } });
+      if (error) throw error;
+      if (data && data.authUrl) { window.location.href = data.authUrl; return; }
+      throw new Error("No auth URL returned");
+    } catch (e) {
+      toast(gcalHint(e) || "Couldn't start Google sign-in. Is the google-calendar function deployed?");
+    }
+  }
+  async function disconnectGcal() {
+    if (!confirm("Disconnect Google Calendar? Your Google events will stop showing here and task sync stops.")) return;
+    try {
+      const { error } = await sb.functions.invoke("google-calendar", { body: { action: "disconnect" } });
+      if (error) throw error;
+      gcalConnected = false; gcalEvents = [];
+      reflectGcal();
+      if (view === "calendar") renderCalendar();
+      toast("Google Calendar disconnected");
+    } catch (e) { toast("Couldn't disconnect — try again."); }
+  }
+  async function pullGcalEvents() {
+    if (!gcalConnected || !sb) return;
+    try {
+      const { data, error } = await sb.functions.invoke("google-calendar", { body: { action: "pull" } });
+      if (error) throw error;
+      gcalEvents = (data && data.events) || [];
+      if (view === "calendar") renderCalendar();
+    } catch (e) { console.warn("gcal pull failed", e); }
+  }
+  // Mirror a task into Google (create/update, or remove on complete/delete).
+  async function pushTaskToGcal(task, opts) {
+    if (!gcalConnected || !sb || !task) return;
+    try {
+      await sb.functions.invoke("google-calendar", {
+        body: { action: "push", task: {
+          id: task.id, title: task.title, notes: task.notes,
+          due: task.due, status: task.status, deleted: !!(opts && opts.deleted),
+        } },
+      });
+    } catch (e) { console.warn("gcal push failed", e); }
+  }
+  function gcalHint(e) {
+    const m = (e && e.message) || "";
+    if (/not_connected/.test(m)) return "Connect Google Calendar first (Settings).";
+    return "";
+  }
+  // Handle the OAuth return (?gcal=connected|error) after Google redirects back.
+  function handleGcalReturn() {
+    const p = new URLSearchParams(location.search);
+    const g = p.get("gcal");
+    if (!g) return;
+    // Clean the query string so a refresh doesn't re-toast.
+    history.replaceState(null, "", location.pathname);
+    if (g === "connected") {
+      toast("Google Calendar connected ✓");
+      checkGcalConnection();
+    } else {
+      const reason = p.get("reason") || "";
+      toast("Google connection failed" + (reason ? ` (${reason})` : "") + ". Try again.");
+    }
   }
 
   // ============================================================
@@ -1157,7 +1278,9 @@
     const row = { ...rowFromTask(data), source: "internal", created_by: me.id };
     const { data: inserted, error } = await sb.from("tasks").insert(row).select().single();
     if (error) { failWrite(error); return null; }
-    upsertLocal(tasks, taskFromRow(inserted)); saveCache(); rerender();
+    const t = taskFromRow(inserted);
+    upsertLocal(tasks, t); saveCache(); rerender();
+    if (t.due) pushTaskToGcal(t);
     return inserted.id;
   }
 
@@ -1192,13 +1315,17 @@
     const row = { ...rowFromTask(merged), needs_attention: false };
     const { data: updated, error } = await sb.from("tasks").update(row).eq("id", id).select().single();
     if (error) return failWrite(error);
-    upsertLocal(tasks, taskFromRow(updated)); saveCache(); rerender();
+    const t = taskFromRow(updated);
+    upsertLocal(tasks, t); saveCache(); rerender();
+    pushTaskToGcal(t);   // create/update mirror, or remove it when completed/undated
   }
   async function deleteTask(id) {
+    const doomed = tasks.find((t) => t.id === id);
     const { error } = await sb.from("tasks").delete().eq("id", id);
     if (error) return failWrite(error);
     const i = tasks.findIndex((t) => t.id === id); if (i >= 0) tasks.splice(i, 1);
     saveCache(); rerender();
+    if (doomed) pushTaskToGcal(doomed, { deleted: true });
   }
 
   async function createProject(name, color) {
@@ -1506,6 +1633,7 @@
     b.addEventListener("click", () => { calMode = b.dataset.cal; renderCalendar(); }));
   $("calFrom") && $("calFrom").addEventListener("change", (e) => { calFrom = e.target.value; renderCalendar(); });
   $("calTo") && $("calTo").addEventListener("change", (e) => { calTo = e.target.value; renderCalendar(); });
+  $("gcalConnectBtn") && $("gcalConnectBtn").addEventListener("click", () => (gcalConnected ? disconnectGcal() : connectGcal()));
   searchInput.addEventListener("input", (e) => { query = e.target.value.trim().toLowerCase(); render(); });
 
   // ---- Theme (light / dark) ----

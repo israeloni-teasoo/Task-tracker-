@@ -97,7 +97,10 @@ the schema but are unused/harmless.
     notification_prefs (per-user push/email) · 019 new-request email via channel ·
     020 realtime memberships · 021 task participants can read/post comments ·
     022 profiles readable by any signed-in user (real author names) · 023
-    blocked_users (remove = revoke access; app_current_role null when blocked).
+    blocked_users (remove = revoke access; app_current_role null when blocked) ·
+    024 Google Calendar sync (`google_accounts` holds the OAuth refresh token,
+    server-only/no client RLS; `google_oauth_states`; `google_calendar_events`
+    read by owner+delegate; `task_gcal_links`; `google_connection()` helper).
 - Notification config lives in the RLS-locked `public.app_settings`
   (`push_fn_url`, `push_webhook_secret`) — never in the repo.
 
@@ -107,6 +110,14 @@ the schema but are unused/harmless.
   (`RESEND_API_KEY`, `EMAIL_FROM`). Called only by DB triggers holding
   `WEBHOOK_SECRET`. Secrets: VAPID_*, WEBHOOK_SECRET, RESEND_API_KEY.
 - `invite-user` — legacy service-role inviter, no longer called by the app.
+- **`google-calendar`** — two-way Google Calendar sync; holds the OAuth refresh
+  token (never sent to the browser). Actions: `start`/`callback` (OAuth connect),
+  `pull` (cache Google events for overlay), `push` (mirror a task with a due date
+  to the user's primary calendar; removed on complete/delete/undated),
+  `disconnect`. Deploy with `--no-verify-jwt`. Secrets: `GOOGLE_CLIENT_ID`,
+  `GOOGLE_CLIENT_SECRET`, `APP_URL`. Setup: `docs/GOOGLE-CALENDAR.md`.
+  Frontend: Settings → Google Calendar (connect/disconnect); events overlay the
+  Calendar view as blue chips; `pushTaskToGcal()` fires on task create/update/delete.
 
 ## Setup checklist (owner/admin, one-time)
 1. Apply schema / run the **Apply DB migrations** Action.
@@ -114,6 +125,9 @@ the schema but are unused/harmless.
 3. Deploy `send-push`; set VAPID + `WEBHOOK_SECRET` secrets; insert the two
    `app_settings` rows (see `docs/NOTIFICATIONS.md`).
 4. For boss email: set `RESEND_API_KEY` + `EMAIL_FROM` on `send-push`, redeploy.
+5. For Google Calendar: create a Google Cloud OAuth client, deploy
+   `google-calendar --no-verify-jwt`, set `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`/
+   `APP_URL` (see `docs/GOOGLE-CALENDAR.md`).
 
 ## Working agreements
 - Develop on branch `claude/internal-task-tracker-43ehtk` (the repo's default).
