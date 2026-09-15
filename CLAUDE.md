@@ -34,11 +34,19 @@ project context._
   person sets their own name on first sign-in.
 
 ### What each role sees (routing in `continueIntoApp`)
-- **owner + delegate → full app** (Kanban board + list, projects, People &
-  roles, Settings). The default **To do** view is PERSONAL — only tasks
-  assigned/directed to them or that they created for themselves (unassigned);
-  the **All tasks** view is the office-wide list of everyone's tasks. `isForMe()`
-  drives To do / My tasks; `isMine()` = assignee/recipient only.
+- **owner + delegate → full app** (Kanban board + list + calendar, projects,
+  People & roles, Settings). Three layouts share the same scope/filters via the
+  topbar toggle: **Board**, **List**, and **Calendar** (`view` = board/list/
+  calendar in `render()`). The Calendar (`renderCalendar()`) has **month / week
+  / day / custom-range** modes (`calMode`, `calDate`, `calFrom`/`calTo`); it lays
+  the active scope's dated tasks onto a grid, chips open the task modal, clicking
+  an empty day opens a new task prefilled to 9 AM that day. The default **To do**
+  view is PERSONAL — only tasks assigned/directed to them or that they created for
+  themselves (unassigned); the **All tasks** view is the office-wide list of
+  everyone's tasks; **Office requests** is its own scope (`source === "request"`)
+  so requests never mix into her personal tasks. `isForMe()` drives To do / My
+  tasks; `isMine()` = assignee/recipient only. Adding a task warns (but still
+  allows) when another open item is scheduled at the same time (`findConflicts`).
 - **editor / viewer / requester → personal dashboard** (`#portalScreen`):
   "Assigned to me" (editors can change status there), a request form, and
   "My requests". They do NOT see the full team board.
@@ -113,4 +121,4 @@ the schema but are unused/harmless.
 - Keep `backend/schema.sql` and both migration folders in sync with every DB change.
 - Update this file whenever the architecture, roles, or setup change.
 
-_Last updated: 2026-09-04._
+_Last updated: 2026-09-15._

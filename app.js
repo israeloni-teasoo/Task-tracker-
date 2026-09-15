@@ -44,6 +44,7 @@
   let profilesById = {};
   let me = null, myRole = "requester";
   let scope = "todo", view = "list", query = "";
+  let calMode = "month", calDate = new Date(), calFrom = "", calTo = "";
   let filters = { priority: "", assignee: [], requester: [], dept: "", due: "" };
   let appReady = false, realtimeChannel = null;
   const seenTaskIds = new Set();   // for "new request" toasts
@@ -52,6 +53,7 @@
   const $ = (id) => document.getElementById(id);
   const bootEl = $("bootLoading"), authScreen = $("authScreen"), appEl = $("app");
   const boardView = $("boardView"), listView = $("listView"), viewTitle = $("viewTitle");
+  const calendarView = $("calendarView");
   const searchInput = $("search"), toastEl = $("toast"), projectListEl = $("projectList");
 
   const can = {
@@ -721,8 +723,10 @@
     updateCounts();
     reflectPermissions();
     renderFilterBar();
-    if (view === "board") { show(boardView); hide(listView); renderBoard(); }
-    else { hide(boardView); show(listView); renderList(); }
+    hide(boardView); hide(listView); hide(calendarView);
+    if (view === "board") { show(boardView); renderBoard(); }
+    else if (view === "calendar") { show(calendarView); renderCalendar(); }
+    else { show(listView); renderList(); }
   }
 
   // Within the next 7 days (today..+7), not overdue.
@@ -973,6 +977,125 @@
   }
 
   // ============================================================
+  //  Calendar view (month / week / day / custom)
+  // ============================================================
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+  const dayKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const parseDayKey = (s) => { const [y, m, dd] = s.split("-").map(Number); return new Date(y, m - 1, dd); };
+
+  // Group the currently visible, dated tasks by their day key, time-sorted.
+  function tasksByDay() {
+    const map = {};
+    visibleTasks().forEach((t) => {
+      if (!t.due) return;
+      const d = new Date(t.due);
+      if (isNaN(d)) return;
+      (map[dayKey(d)] = map[dayKey(d)] || []).push(t);
+    });
+    Object.values(map).forEach((arr) => arr.sort((a, b) => new Date(a.due) - new Date(b.due)));
+    return map;
+  }
+
+  function calTaskChip(t) {
+    const time = dueHasTime(t.due) ? new Date(t.due).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : "";
+    const s = STATUSES.find((x) => x.key === t.status);
+    const color = s ? s.color : "#94a3b8";
+    return `<button class="cal-chip prio-${t.priority} ${t.status === "completed" ? "done" : ""}" data-id="${t.id}" title="${esc(t.title)}${time ? " · " + time : ""}">
+        <span class="cal-chip-dot" style="background:${color}"></span>${time ? `<span class="cal-chip-time">${time}</span>` : ""}<span class="cal-chip-title">${esc(t.title)}</span>
+      </button>`;
+  }
+
+  function renderCalendar() {
+    const body = $("calBody"), label = $("calLabel"), custom = $("calCustom");
+    if (!body) return;
+    document.querySelectorAll(".cal-mode-btn").forEach((b) => b.classList.toggle("active", b.dataset.cal === calMode));
+    if (custom) custom.hidden = calMode !== "custom";
+    const byDay = tasksByDay();
+
+    if (calMode === "month") {
+      const first = new Date(calDate.getFullYear(), calDate.getMonth(), 1);
+      label.textContent = calDate.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+      const gridStart = addDays(startOfDay(first), -first.getDay());
+      const weeks = [];
+      for (let w = 0; w < 6; w++) weeks.push(Array.from({ length: 7 }, (_, i) => addDays(gridStart, w * 7 + i)));
+      const head = WEEKDAYS.map((d) => `<div class="cal-dow">${d}</div>`).join("");
+      const cells = weeks.flat().map((d) => calDayCell(d, byDay, d.getMonth() !== calDate.getMonth())).join("");
+      body.innerHTML = `<div class="cal-month"><div class="cal-dow-row">${head}</div><div class="cal-grid">${cells}</div></div>`;
+    } else if (calMode === "week") {
+      const weekStart = addDays(startOfDay(calDate), -calDate.getDay());
+      const weekEnd = addDays(weekStart, 6);
+      label.textContent = `${weekStart.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${weekEnd.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
+      const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+      body.innerHTML = `<div class="cal-cols">${days.map((d) => calDayColumn(d, byDay)).join("")}</div>`;
+    } else if (calMode === "day") {
+      label.textContent = calDate.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+      body.innerHTML = `<div class="cal-cols cal-cols-1">${calDayColumn(calDate, byDay)}</div>`;
+    } else { // custom range
+      const from = calFrom ? parseDayKey(calFrom) : startOfDay(calDate);
+      const to = calTo ? parseDayKey(calTo) : from;
+      label.textContent = "Custom range";
+      if (to < from) { body.innerHTML = `<div class="empty-state"><p>Pick a “To” date on or after the “From” date.</p></div>`; return; }
+      const span = Math.round((startOfDay(to) - startOfDay(from)) / DAY_MS);
+      if (span > 92) { body.innerHTML = `<div class="empty-state"><p>Range too large — pick 3 months or less.</p></div>`; return; }
+      const days = Array.from({ length: span + 1 }, (_, i) => addDays(from, i));
+      body.innerHTML = `<div class="cal-list">${days.map((d) => {
+        const items = byDay[dayKey(d)] || [];
+        if (!items.length) return "";
+        return `<div class="cal-list-day"><div class="cal-list-date">${d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}</div><div class="cal-list-items">${items.map(calTaskChip).join("")}</div></div>`;
+      }).join("") || `<div class="empty-state"><p>Nothing scheduled in this range.</p></div>`}</div>`;
+    }
+    wireCalendar();
+  }
+
+  function calDayCell(d, byDay, muted) {
+    const items = byDay[dayKey(d)] || [];
+    const isToday = dayKey(d) === dayKey(new Date());
+    const shown = items.slice(0, 4).map(calTaskChip).join("");
+    const more = items.length > 4 ? `<button class="cal-more" data-day="${dayKey(d)}">+${items.length - 4} more</button>` : "";
+    return `<div class="cal-cell ${muted ? "muted" : ""} ${isToday ? "today" : ""}" data-day="${dayKey(d)}">
+        <div class="cal-cell-num">${d.getDate()}</div>
+        <div class="cal-cell-items">${shown}${more}</div>
+      </div>`;
+  }
+
+  function calDayColumn(d, byDay) {
+    const items = byDay[dayKey(d)] || [];
+    const isToday = dayKey(d) === dayKey(new Date());
+    return `<div class="cal-col ${isToday ? "today" : ""}" data-day="${dayKey(d)}">
+        <div class="cal-col-head">${d.toLocaleDateString(undefined, { weekday: "short" })} <strong>${d.getDate()}</strong></div>
+        <div class="cal-col-body">${items.length ? items.map(calTaskChip).join("") : `<div class="cal-col-empty">—</div>`}</div>
+      </div>`;
+  }
+
+  function wireCalendar() {
+    calendarView.querySelectorAll(".cal-chip").forEach((c) =>
+      c.addEventListener("click", (e) => { e.stopPropagation(); openModal(c.dataset.id); }));
+    // Clicking an empty spot in a day opens a new task prefilled to that date.
+    calendarView.querySelectorAll(".cal-cell, .cal-col").forEach((cell) =>
+      cell.addEventListener("click", (e) => {
+        if (e.target.closest(".cal-chip") || e.target.closest(".cal-more")) return;
+        if (!can.edit()) return;
+        openModal(null, cell.dataset.day);
+      }));
+    // "+N more" jumps to that day in day-mode.
+    calendarView.querySelectorAll(".cal-more").forEach((b) =>
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        calDate = parseDayKey(b.dataset.day); calMode = "day"; renderCalendar();
+      }));
+  }
+
+  function calStep(dir) {
+    if (calMode === "month") calDate = new Date(calDate.getFullYear(), calDate.getMonth() + dir, 1);
+    else if (calMode === "week") calDate = addDays(calDate, dir * 7);
+    else calDate = addDays(calDate, dir);
+    renderCalendar();
+  }
+
+  // ============================================================
   //  Cards / list / drag & drop
   // ============================================================
   function wireCards() {
@@ -1137,7 +1260,7 @@
     }).join("");
   }
 
-  function openModal(id) {
+  function openModal(id, prefillDay) {
     const t = id ? tasks.find((x) => x.id === id) : null;
     if (t && !can.edit()) return;   // read-only roles can't open the editor
     const scoped = scope.startsWith("project:") ? scope.slice(8) : (defaultProject() || {}).id;
@@ -1149,7 +1272,9 @@
     fillAssigneeOptions(t ? (assigneesByTask[t.id] || []) : []);
     $("fPriority").value = t ? t.priority : "medium";
     $("fStatus").value = t ? t.status : "pending";
-    $("fDue").value = t ? toInputDateTime(t.due) : "";
+    // New task from a calendar day: prefill the date (9:00 AM), time editable.
+    $("fDue").value = t ? toInputDateTime(t.due)
+      : (prefillDay ? `${prefillDay}T09:00` : "");
     deleteBtn.hidden = !t || !can.delete();
     // Attachments + activity only apply to an already-saved task.
     const extra = $("taskExtra");
@@ -1372,6 +1497,15 @@
       btn.classList.add("active"); view = btn.dataset.view; render();
     });
   });
+
+  // ---- Calendar controls ----
+  $("calPrev") && $("calPrev").addEventListener("click", () => calStep(-1));
+  $("calNext") && $("calNext").addEventListener("click", () => calStep(1));
+  $("calToday") && $("calToday").addEventListener("click", () => { calDate = new Date(); renderCalendar(); });
+  document.querySelectorAll(".cal-mode-btn").forEach((b) =>
+    b.addEventListener("click", () => { calMode = b.dataset.cal; renderCalendar(); }));
+  $("calFrom") && $("calFrom").addEventListener("change", (e) => { calFrom = e.target.value; renderCalendar(); });
+  $("calTo") && $("calTo").addEventListener("change", (e) => { calTo = e.target.value; renderCalendar(); });
   searchInput.addEventListener("input", (e) => { query = e.target.value.trim().toLowerCase(); render(); });
 
   // ---- Theme (light / dark) ----

@@ -247,6 +247,7 @@
           <div class="view-toggle" role="tablist" aria-label="Layout">
             <button class="toggle-btn" data-view="board" role="tab">▦ Board</button>
             <button class="toggle-btn active" data-view="list" role="tab">☰ List</button>
+            <button class="toggle-btn" data-view="calendar" role="tab">📅 Calendar</button>
           </div>
         </div>
         <div class="topbar-right">
@@ -292,6 +293,29 @@
 
       <!-- List view -->
       <section id="listView" class="list-view" aria-label="List view"></section>
+
+      <!-- Calendar view -->
+      <section id="calendarView" class="calendar-view" aria-label="Calendar view" hidden>
+        <div class="cal-toolbar">
+          <div class="cal-nav">
+            <button class="ghost-btn" id="calPrev" aria-label="Previous">‹</button>
+            <button class="ghost-btn" id="calToday">Today</button>
+            <button class="ghost-btn" id="calNext" aria-label="Next">›</button>
+            <span class="cal-label" id="calLabel"></span>
+          </div>
+          <div class="cal-modes" role="tablist" aria-label="Calendar range">
+            <button class="cal-mode-btn active" data-cal="month" role="tab">Month</button>
+            <button class="cal-mode-btn" data-cal="week" role="tab">Week</button>
+            <button class="cal-mode-btn" data-cal="day" role="tab">Day</button>
+            <button class="cal-mode-btn" data-cal="custom" role="tab">Custom</button>
+          </div>
+          <div class="cal-custom" id="calCustom" hidden>
+            <label>From <input type="date" id="calFrom" /></label>
+            <label>To <input type="date" id="calTo" /></label>
+          </div>
+        </div>
+        <div class="cal-body" id="calBody"></div>
+      </section>
     </main>
 
     <!-- ===== Mobile bottom navigation ===== -->
