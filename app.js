@@ -640,6 +640,20 @@
     if (isNaN(d)) return "";
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
+  const hasTimePart = (due) => { const d = new Date(due); return !isNaN(d) && !(d.getHours() === 0 && d.getMinutes() === 0); };
+  // Other open tasks scheduled around the same time (±1h if timed, else same day).
+  function findConflicts(dueISO, excludeId) {
+    const d = new Date(dueISO);
+    if (isNaN(d)) return [];
+    const timed = hasTimePart(dueISO);
+    return tasks.filter((t) => {
+      if (t.id === excludeId || !t.due || t.status === "completed") return false;
+      const td = new Date(t.due);
+      if (isNaN(td)) return false;
+      if (timed && hasTimePart(t.due)) return Math.abs(td.getTime() - d.getTime()) <= 60 * 60 * 1000;
+      return dueDayStr(t.due) === dueDayStr(dueISO);
+    });
+  }
   function dueState(due) {
     const ds = dueDayStr(due);
     if (!ds) return "";
@@ -675,8 +689,11 @@
   // ============================================================
   function visibleTasks() {
     return tasks.filter((t) => {
-      if (scope === "todo" && (t.status === "completed" || !isForMe(t))) return false;
-      if (scope === "mine" && !isForMe(t)) return false;
+      // Personal views (To do / My tasks) are PERSONAL tasks only — office
+      // requests live under their own "Office requests" view so they don't mix.
+      if (scope === "todo" && (t.status === "completed" || t.source === "request" || !isForMe(t))) return false;
+      if (scope === "mine" && (t.source === "request" || !isForMe(t))) return false;
+      if (scope === "requests" && t.source !== "request") return false;
       if (scope === "today" && dueState(t.due) !== "today") return false;
       if (scope === "overdue" && dueState(t.due) !== "overdue") return false;
       if (scope === "attention" && !t.needsAttention) return false;
@@ -838,17 +855,19 @@
   }
 
   function updateCounts() {
-    let today = 0, overdue = 0, attention = 0, completed = 0, mine = 0, todo = 0;
+    let today = 0, overdue = 0, attention = 0, completed = 0, mine = 0, todo = 0, requests = 0;
     tasks.forEach((t) => {
       const ds = dueState(t.due);
       if (ds === "today") today++; if (ds === "overdue") overdue++;
       if (t.needsAttention) attention++;
-      const forMe = isForMe(t);
-      if (t.status !== "completed" && forMe) todo++;
+      if (t.source === "request") requests++;
+      const personal = t.source !== "request" && isForMe(t);
+      if (t.status !== "completed" && personal) todo++;
       if (t.status === "completed") completed++;
-      if (forMe) mine++;
+      if (personal) mine++;
     });
     setCount("all", tasks.length); setCount("today", today); setCount("mine", mine); setCount("todo", todo);
+    setCount("requests", requests);
     setCount("overdue", overdue); setCount("attention", attention); setCount("completed", completed);
     const badge = $("mAttnBadge");
     if (badge) { badge.textContent = attention; badge.hidden = attention === 0; }
@@ -1150,6 +1169,15 @@
       status: $("fStatus").value, due: fromInputDateTime($("fDue").value),
     };
     if (!data.title) return;
+    // Warn (but allow) if something is already scheduled at the same time.
+    if (data.due) {
+      const clash = findConflicts(data.due, id);
+      if (clash.length) {
+        const names = clash.slice(0, 3).map((t) => `• ${t.title} (${formatDue(t.due)})`).join("\n");
+        const more = clash.length > 3 ? `\n…and ${clash.length - 3} more` : "";
+        if (!confirm(`You already have ${clash.length} item(s) around this time:\n\n${names}${more}\n\nAdd this task anyway?`)) return;
+      }
+    }
     const assignees = Array.from(document.querySelectorAll('#fAssignees input:checked')).map((c) => c.value);
     closeModal();
     if (id) {
@@ -1370,7 +1398,7 @@
 
   // ---- Mobile bottom nav + "More" sheet ----
   const moreSheet = $("moreSheet");
-  const SCOPE_TITLE = { todo: "To do", all: "All tasks", today: "Due today", overdue: "Overdue", attention: "Needs attention", completed: "Completed log" };
+  const SCOPE_TITLE = { todo: "To do", all: "All tasks", mine: "My tasks", requests: "Office requests", today: "Due today", overdue: "Overdue", attention: "Needs attention", completed: "Completed log" };
   function openSheet() { renderSidebarProjects(); show(moreSheet); }
   function closeSheet() { if (moreSheet) moreSheet.hidden = true; }
 
