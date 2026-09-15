@@ -1,0 +1,47 @@
+name: Deploy Edge Function
+
+# Manual only. Deploys one Edge Function from backend/functions/ to the hosted
+# Supabase project using the same repo secret SUPABASE_ACCESS_TOKEN as the
+# migrations workflow — so you can deploy from the browser, no local CLI needed.
+#
+# Functions live in backend/functions/, but the Supabase CLI expects them under
+# supabase/functions/, so we stage the chosen one there before deploying.
+# --no-verify-jwt is required: send-push is called by DB triggers and
+# google-calendar handles Google's OAuth callback, neither of which carries a
+# Supabase JWT (each function authenticates itself).
+on:
+  workflow_dispatch:
+    inputs:
+      function:
+        description: "Function name (folder under backend/functions/)"
+        required: true
+        default: "google-calendar"
+      project_ref:
+        description: "Supabase project ref"
+        required: true
+        default: "tlapegutuiaikhbjhhkg"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Stage the function where the CLI looks for it
+        run: |
+          set -e
+          SRC="backend/functions/${{ github.event.inputs.function }}"
+          if [ ! -d "$SRC" ]; then echo "No such function: $SRC" >&2; exit 1; fi
+          mkdir -p supabase/functions
+          cp -r "$SRC" "supabase/functions/${{ github.event.inputs.function }}"
+      - name: Deploy
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          supabase functions deploy "${{ github.event.inputs.function }}" \
+            --project-ref "${{ github.event.inputs.project_ref }}" \
+            --no-verify-jwt

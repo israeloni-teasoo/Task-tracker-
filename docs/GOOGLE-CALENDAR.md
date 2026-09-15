@@ -38,15 +38,28 @@ Function. Nothing syncs until this is done.
 
 ### 2. Deploy the Edge Function
 
-The callback comes from Google with **no** Supabase JWT, so deploy with JWT
-verification off (the function authenticates each action itself):
+The callback comes from Google with **no** Supabase JWT, so it deploys with JWT
+verification off (the function authenticates each action itself).
 
+**Browser (no CLI) — recommended:** GitHub repo → **Actions** tab → **Deploy
+Edge Function** → **Run workflow** (leave `function` = `google-calendar`, keep
+the project ref). It uses the same `SUPABASE_ACCESS_TOKEN` repo secret as the
+migrations workflow and deploys with `--no-verify-jwt` for you.
+
+**Or via CLI on your own computer:**
 ```bash
 supabase functions deploy google-calendar --no-verify-jwt
 ```
 
 ### 3. Set the function secrets
 
+**Browser (no CLI) — recommended:** Supabase dashboard → **Project Settings →
+Edge Functions → Secrets** (or **Edge Functions → Manage secrets**) → add three:
+- `GOOGLE_CLIENT_ID` = your client id
+- `GOOGLE_CLIENT_SECRET` = your client secret
+- `APP_URL` = `https://services.teasooconsulting.com`
+
+**Or via CLI:**
 ```bash
 supabase secrets set \
   GOOGLE_CLIENT_ID="<your client id>" \
@@ -56,7 +69,9 @@ supabase secrets set \
 
 `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are provided to Edge Functions
 automatically. `APP_URL` must be the exact origin the app is served from — it is
-where Google returns the user after they approve.
+where Google returns the user after they approve. Set the secrets **before**
+using the connect flow (redeploy is not needed — functions read secrets at run
+time).
 
 ### 4. Apply the database migration
 

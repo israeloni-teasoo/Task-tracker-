@@ -110,6 +110,12 @@ the schema but are unused/harmless.
   (`RESEND_API_KEY`, `EMAIL_FROM`). Called only by DB triggers holding
   `WEBHOOK_SECRET`. Secrets: VAPID_*, WEBHOOK_SECRET, RESEND_API_KEY.
 - `invite-user` — legacy service-role inviter, no longer called by the app.
+- **Deploying functions:** the **Deploy Edge Function** GitHub Action
+  (`.github/workflows/deploy-function.yml`, manual) stages a function from
+  `backend/functions/` into `supabase/functions/` and runs
+  `supabase functions deploy <name> --no-verify-jwt` with `SUPABASE_ACCESS_TOKEN`
+  — browser-only, no local CLI. (Function secrets are set in the Supabase
+  dashboard → Edge Functions → Secrets.)
 - **`google-calendar`** — two-way Google Calendar sync; holds the OAuth refresh
   token (never sent to the browser). Actions: `start`/`callback` (OAuth connect),
   `pull` (cache Google events for overlay), `push` (mirror a task with a due date
