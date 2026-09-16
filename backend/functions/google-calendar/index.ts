@@ -31,7 +31,9 @@ const admin = createClient(SUPABASE_URL, SERVICE_KEY);
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, content-type",
+  // Must list every header supabase-js attaches, or the browser's preflight
+  // fails with "Failed to send a request to the Edge Function".
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-api-version",
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
 };
 const json = (body: unknown, status = 200) =>
