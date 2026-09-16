@@ -212,6 +212,12 @@
       </nav>
 
       <div class="sidebar-footer">
+        <div class="desk-switcher" id="deskSwitcher" hidden>
+          <span class="desk-ico">🪑</span>
+          <select id="deskSelect" aria-label="Whose desk to manage">
+            <option value="">My desk</option>
+          </select>
+        </div>
         <button class="ghost-btn nav-action" id="peopleBtn" hidden>👥 People &amp; roles</button>
         <button class="ghost-btn notif-btn" id="settingsBtn" title="Settings">⚙ Settings</button>
         <div class="account" id="account" hidden>
@@ -236,26 +242,21 @@
             <button class="toggle-btn active" data-view="list" role="tab">☰ List</button>
             <button class="toggle-btn" data-view="calendar" role="tab">📅 Calendar</button>
           </div>
-          <div class="desk-switcher" id="deskSwitcher" hidden>
-            <span class="desk-ico">🪑</span>
-            <select id="deskSelect" aria-label="Whose desk to manage">
-              <option value="">My desk</option>
-            </select>
-          </div>
         </div>
         <div class="topbar-right">
           <div class="search-wrap">
             <span class="search-icon">⌕</span>
             <input type="search" id="search" placeholder="Search tasks…" aria-label="Search tasks" />
           </div>
-          <button class="icon-btn refresh-btn" id="refreshBtn" title="Refresh" aria-label="Refresh">🔄</button>
+          <button class="icon-btn filter-top" id="mFilterBtn" title="Filters" aria-label="Filters">⚙<span class="flt-badge" id="mFilterBadge" hidden>0</span></button>
           <button class="icon-btn theme-top js-theme-toggle" title="Toggle light/dark" aria-label="Toggle light/dark">🌙</button>
           <button class="primary-btn" id="newTaskBtn">＋ New task</button>
         </div>
       </header>
 
-      <!-- Filter bar -->
+      <!-- Filter bar (a bottom sheet on mobile, toggled by #mFilterBtn) -->
       <div class="filter-bar" id="filterBar">
+        <div class="filter-sheet-head"><span>Filters</span><button type="button" class="ghost-btn" id="mFilterDone">Done</button></div>
         <select class="filter-select" id="fltPriority" aria-label="Filter by priority">
           <option value="">All priorities</option>
           <option value="high">High</option>
@@ -511,6 +512,21 @@
           </div>
           <div id="healthResults" class="health-results" hidden></div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Google event detail (modal on desktop, drawer on mobile) ===== -->
+  <div class="modal-overlay sheet-capable" id="eventOverlay" hidden>
+    <div class="modal event-modal" role="dialog" aria-modal="true" aria-labelledby="evTitle">
+      <div class="modal-head">
+        <h3 id="evTitle">Event</h3>
+        <button class="icon-btn" id="evClose" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="event-badge"><span class="gcal-dot"></span> Google Calendar</div>
+        <p class="event-when" id="evWhen"></p>
+        <a class="ghost-btn event-open" id="evOpen" href="#" target="_blank" rel="noopener">Open in Google Calendar ↗</a>
       </div>
     </div>
   </div>

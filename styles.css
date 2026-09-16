@@ -360,15 +360,15 @@ body {
 #viewTitle { font-size: 20px; font-weight: 700; letter-spacing: -.3px; }
 
 .desk-switcher {
-  display: inline-flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: 6px;
   background: var(--c-bg); border: 1px solid var(--c-border);
-  border-radius: 9px; padding: 3px 8px 3px 10px;
+  border-radius: 9px; padding: 5px 8px 5px 10px; margin-bottom: 4px;
 }
-.desk-switcher .desk-ico { font-size: 13px; }
+.desk-switcher .desk-ico { font-size: 13px; flex: none; }
 .desk-switcher select {
   border: none; background: transparent; color: var(--c-text);
   font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
-  padding: 3px 2px; outline: none; max-width: 180px;
+  padding: 2px; outline: none; flex: 1; min-width: 0;
 }
 .desk-switcher.acting {
   background: var(--c-accent-soft); border-color: var(--c-accent);
@@ -508,6 +508,22 @@ body {
 }
 .empty-state .big { font-size: 40px; margin-bottom: 10px; }
 .empty-state p { font-size: 14px; }
+
+/* ===== Google event detail ===== */
+.event-modal { max-width: 400px; }
+.event-badge { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; color: var(--c-text-soft); }
+.event-badge .gcal-dot { width: 9px; height: 9px; border-radius: 50%; background: #4285f4; }
+.event-when { font-size: 15px; font-weight: 600; margin: 4px 0 8px; }
+.event-open { align-self: flex-start; text-decoration: none; }
+@media (max-width: 760px) {
+  /* Detail comes up as a bottom drawer on phones. */
+  #eventOverlay { align-items: flex-end; padding: 0; }
+  #eventOverlay .event-modal {
+    max-width: none; width: 100%;
+    border-radius: 18px 18px 0 0; animation: sheetUp .2s ease;
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+}
 
 /* ===== Calendar view ===== */
 .calendar-view { flex: 1; overflow-y: auto; padding: 16px 24px 24px; display: flex; flex-direction: column; }
@@ -656,6 +672,10 @@ body {
 .health-row small { flex-basis: 100%; color: var(--c-text-faint); }
 /* Filter bar (admin task view) */
 .filter-bar { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 24px 0; align-items: center; }
+.filter-sheet-head { display: none; }        /* only shown in the mobile sheet */
+.filter-top { display: none; position: relative; }   /* mobile-only trigger */
+.filter-top.has-value { border-color: var(--c-accent); color: var(--c-accent); }
+.flt-badge { position: absolute; top: -4px; right: -4px; background: var(--c-accent); color: #fff; font-size: 10px; font-weight: 700; min-width: 15px; height: 15px; border-radius: 8px; display: grid; place-items: center; padding: 0 3px; }
 .filter-select { border: 1px solid var(--c-border); background: var(--c-surface); color: var(--c-text); border-radius: 8px; padding: 7px 10px; font: inherit; font-size: 12.5px; max-width: 180px; }
 .filter-select:focus { outline: none; border-color: var(--c-accent); }
 .filter-clear { padding: 6px 10px; font-size: 12.5px; }
@@ -754,6 +774,30 @@ body {
   .search-wrap { flex: 1; }
   .topbar-right { flex: 1; }
   .field-row { grid-template-columns: 1fr; }
+
+  /* Filters collapse into one button that opens a bottom sheet. */
+  .filter-top { display: inline-flex; flex: none; }
+  .filter-bar { display: none; }
+  body.filters-open .filter-bar {
+    display: flex; flex-direction: column; align-items: stretch; gap: 12px;
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+    background: var(--c-surface); border-top-left-radius: 18px; border-top-right-radius: 18px;
+    padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0));
+    max-height: 80vh; overflow-y: auto; box-shadow: 0 -8px 30px rgba(16,24,40,.25);
+    animation: sheetUp .2s ease;
+  }
+  body.filters-open::after {   /* backdrop */
+    content: ""; position: fixed; inset: 0; z-index: 55; background: rgba(16,24,40,.4);
+  }
+  body.filters-open .filter-sheet-head {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 16px; font-weight: 700; margin-bottom: 2px;
+  }
+  body.filters-open .filter-select, body.filters-open .ms { width: 100%; max-width: none; flex: none; }
+  body.filters-open .ms-btn { width: 100%; }
+  body.filters-open .ms-panel { position: static; box-shadow: none; border-color: var(--c-border); margin-top: 6px; max-height: 200px; }
+  body.filters-open .filter-clear { align-self: flex-start; }
+  @keyframes sheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
 
   /* keep content clear of the fixed bottom bar */
   .board, .list-view, .calendar-view { padding-bottom: 86px; }

@@ -47,8 +47,8 @@ project context._
   so requests never mix into her personal tasks. `isForMe()` drives To do / My
   tasks; `isMine()` = assignee/recipient only. Adding a task warns (but still
   allows) when another open item is scheduled at the same time (`findConflicts`).
-  **Managing another desk (PA feature):** owner/delegate get a topbar **"My desk
-  / <name>'s desk"** switcher (`actingFor`, persisted). Selecting a person makes
+  **Managing another desk (PA feature):** owner/delegate get a **"My desk /
+  <name>'s desk"** switcher in the **sidebar footer** (`actingFor`, persisted). Selecting a person makes
   the personal views (To do / My tasks / calendar / counts) resolve to *their*
   identity via `effectiveUid()`, and new tasks default to being assigned to them
   — but every write stays authored by the real signed-in user (`created_by =
@@ -130,7 +130,13 @@ the schema but are unused/harmless.
   `disconnect`. Deploy with `--no-verify-jwt`. Secrets: `GOOGLE_CLIENT_ID`,
   `GOOGLE_CLIENT_SECRET`, `APP_URL`. Setup: `docs/GOOGLE-CALENDAR.md`.
   Frontend: Settings → Google Calendar (connect/disconnect); events overlay the
-  Calendar view as blue chips; `pushTaskToGcal()` fires on task create/update/delete.
+  Calendar view as blue chips that open an in-app detail modal/drawer
+  (`openEventDetail`, `#eventOverlay`); `pushTaskToGcal()` fires on task
+  create/update/delete. `findConflicts()` (new-task same-time warning) checks
+  BOTH platform tasks AND Google events, so real calendar clashes are caught.
+  (Topbar has no refresh button — data auto-refreshes on focus/visibility/poll/
+  realtime + the update pill. On mobile, all filters collapse into one **Filters**
+  button that opens a bottom sheet.)
 
 ## Setup checklist (owner/admin, one-time)
 1. Apply schema / run the **Apply DB migrations** Action.

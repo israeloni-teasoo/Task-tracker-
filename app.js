@@ -649,18 +649,29 @@
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
   const hasTimePart = (due) => { const d = new Date(due); return !isNaN(d) && !(d.getHours() === 0 && d.getMinutes() === 0); };
-  // Other open tasks scheduled around the same time (±1h if timed, else same day).
+  // Anything scheduled around the same time (±1h if timed, else same day) —
+  // open tasks AND Google Calendar events, so a new task warns about real
+  // calendar clashes, not just platform tasks. Returns {title, due} rows.
   function findConflicts(dueISO, excludeId) {
     const d = new Date(dueISO);
     if (isNaN(d)) return [];
     const timed = hasTimePart(dueISO);
-    return tasks.filter((t) => {
-      if (t.id === excludeId || !t.due || t.status === "completed") return false;
-      const td = new Date(t.due);
-      if (isNaN(td)) return false;
-      if (timed && hasTimePart(t.due)) return Math.abs(td.getTime() - d.getTime()) <= 60 * 60 * 1000;
-      return dueDayStr(t.due) === dueDayStr(dueISO);
+    const clashes = (otherISO, otherTimed) => {
+      const od = new Date(otherISO);
+      if (isNaN(od)) return false;
+      if (timed && otherTimed) return Math.abs(od.getTime() - d.getTime()) <= 60 * 60 * 1000;
+      return dueDayStr(otherISO) === dueDayStr(dueISO);
+    };
+    const out = [];
+    tasks.forEach((t) => {
+      if (t.id === excludeId || !t.due || t.status === "completed") return;
+      if (clashes(t.due, hasTimePart(t.due))) out.push({ title: t.title, due: t.due });
     });
+    gcalEvents.forEach((e) => {
+      if (!e.start) return;
+      if (clashes(e.start, !e.allDay)) out.push({ title: "📅 " + (e.summary || "Google event"), due: e.start });
+    });
+    return out;
   }
   function dueState(due) {
     const ds = dueDayStr(due);
@@ -789,7 +800,29 @@
     if ($("fltDue")) $("fltDue").value = filters.due || "";
     const any = filters.priority || filters.assignee.length || filters.requester.length || filters.dept || filters.due;
     if ($("fltClear")) $("fltClear").hidden = !any;
+    reflectFilterButton();
   }
+  // Mobile "Filters" button badge + open/close of the bottom sheet.
+  function activeFilterCount() {
+    return (filters.priority ? 1 : 0) + (filters.assignee.length ? 1 : 0) +
+      (filters.requester.length ? 1 : 0) + (filters.dept ? 1 : 0) + (filters.due ? 1 : 0);
+  }
+  function reflectFilterButton() {
+    const btn = $("mFilterBtn"), badge = $("mFilterBadge");
+    if (!btn) return;
+    const n = activeFilterCount();
+    btn.classList.toggle("has-value", n > 0);
+    if (badge) { badge.hidden = n === 0; badge.textContent = n; }
+  }
+  const closeFilterSheet = () => document.body.classList.remove("filters-open");
+  $("mFilterBtn") && $("mFilterBtn").addEventListener("click", (e) => { e.stopPropagation(); document.body.classList.toggle("filters-open"); });
+  $("mFilterDone") && $("mFilterDone").addEventListener("click", closeFilterSheet);
+  // Close the sheet when tapping the dimmed backdrop (outside the bar).
+  document.addEventListener("click", (e) => {
+    if (!document.body.classList.contains("filters-open")) return;
+    if (e.target.closest("#filterBar") || e.target.closest("#mFilterBtn")) return;
+    closeFilterSheet();
+  });
 
   [["fltPriority", "priority"], ["fltDept", "dept"], ["fltDue", "due"]]
     .forEach(([id, key]) => { const el = $(id); if (el) el.addEventListener("change", () => { filters[key] = el.value; render(); }); });
@@ -1055,10 +1088,29 @@
   function gcalChip(e) {
     const d = new Date(e.start);
     const time = (!e.allDay && !isNaN(d)) ? d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : "";
-    return `<a class="cal-chip gcal" href="${esc(e.link || "#")}" target="_blank" rel="noopener" title="Google: ${esc(e.summary)}${time ? " · " + time : ""}">
+    return `<button class="cal-chip gcal" data-gid="${esc(e.id)}" title="Google: ${esc(e.summary)}${time ? " · " + time : ""}">
         <span class="cal-chip-dot" style="background:#4285f4"></span>${time ? `<span class="cal-chip-time">${time}</span>` : ""}<span class="cal-chip-title">${esc(e.summary)}</span>
-      </a>`;
+      </button>`;
   }
+  // In-app detail for a Google event (modal on desktop, bottom drawer on mobile).
+  function openEventDetail(gid) {
+    const e = gcalEvents.find((x) => x.id === gid);
+    if (!e) return;
+    const start = new Date(e.start), end = e.end ? new Date(e.end) : null;
+    const dateStr = isNaN(start) ? "" : start.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+    let timeStr = "All day";
+    if (!e.allDay && !isNaN(start)) {
+      const s = start.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+      const en = end && !isNaN(end) ? end.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : "";
+      timeStr = en ? `${s} – ${en}` : s;
+    }
+    $("evTitle").textContent = e.summary || "(no title)";
+    $("evWhen").textContent = [dateStr, timeStr].filter(Boolean).join(" · ");
+    const link = $("evOpen");
+    if (e.link) { link.href = e.link; link.hidden = false; } else { link.hidden = true; }
+    show($("eventOverlay"));
+  }
+  const closeEventDetail = () => hide($("eventOverlay"));
 
   function renderCalendar() {
     const body = $("calBody"), label = $("calLabel"), custom = $("calCustom");
@@ -1133,7 +1185,7 @@
     calendarView.querySelectorAll(".cal-chip:not(.gcal)").forEach((c) =>
       c.addEventListener("click", (e) => { e.stopPropagation(); openModal(c.dataset.id); }));
     calendarView.querySelectorAll(".cal-chip.gcal").forEach((c) =>
-      c.addEventListener("click", (e) => { e.stopPropagation(); }));
+      c.addEventListener("click", (e) => { e.stopPropagation(); openEventDetail(c.dataset.gid); }));
     // Clicking an empty spot in a day opens a new task prefilled to that date.
     calendarView.querySelectorAll(".cal-cell, .cal-col").forEach((cell) =>
       cell.addEventListener("click", (e) => {
@@ -1690,6 +1742,8 @@
   $("calTo") && $("calTo").addEventListener("change", (e) => { calTo = e.target.value; renderCalendar(); });
   $("gcalConnectBtn") && $("gcalConnectBtn").addEventListener("click", () => (gcalConnected ? disconnectGcal() : connectGcal()));
   $("deskSelect") && $("deskSelect").addEventListener("change", (e) => setActingFor(e.target.value));
+  $("evClose") && $("evClose").addEventListener("click", closeEventDetail);
+  $("eventOverlay") && $("eventOverlay").addEventListener("click", (e) => { if (e.target === $("eventOverlay")) closeEventDetail(); });
   searchInput.addEventListener("input", (e) => { query = e.target.value.trim().toLowerCase(); render(); });
 
   // ---- Theme (light / dark) ----
