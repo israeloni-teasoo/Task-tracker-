@@ -46,6 +46,7 @@
   let scope = "todo", view = "list", query = "";
   let calMode = "month", calDate = new Date(), calFrom = "", calTo = "";
   let gcalConnected = false, gcalEvents = [];
+  let actingFor = null;   // user id whose "desk" a Delegate/Admin is managing, else null
   let filters = { priority: "", assignee: [], requester: [], dept: "", due: "" };
   let appReady = false, realtimeChannel = null;
   const seenTaskIds = new Set();   // for "new request" toasts
@@ -186,6 +187,7 @@
       primeSeen();             // seed before realtime so existing requests don't toast
       primeFlagged();          // seed so existing reminders don't chime
       saveCache();
+      try { actingFor = localStorage.getItem("tasktrack.actingFor") || null; } catch (_) {}
       subscribeRealtime();
       render();
       setupNotifications();
@@ -815,6 +817,29 @@
     $("mAddBtn").style.display = editor ? "" : "none";
     $("mNewProjectBtn").style.display = editor ? "" : "none";
     $("mPeopleBtn").hidden = !canManagePeople();
+    renderDeskSwitcher();
+  }
+
+  // "Manage another person's desk" — only Admin/Managing Partner (owner/delegate).
+  // Refocuses the personal views on that person; actions stay authored by me.
+  function renderDeskSwitcher() {
+    const wrap = $("deskSwitcher"), sel = $("deskSelect");
+    if (!wrap || !sel) return;
+    const canManage = ["owner", "delegate"].includes(myRole);
+    wrap.hidden = !canManage;
+    if (!canManage) { actingFor = null; return; }
+    // Drop a stale selection (person removed).
+    if (actingFor && !people.some((p) => p.userId === actingFor)) actingFor = null;
+    const others = people.filter((p) => p.userId !== (me && me.id));
+    sel.innerHTML = `<option value="">My desk</option>` +
+      others.map((p) => `<option value="${esc(p.userId)}">${esc(p.name || p.email || "User")}'s desk</option>`).join("");
+    sel.value = actingFor || "";
+    wrap.classList.toggle("acting", !!actingFor);
+  }
+  function setActingFor(uid) {
+    actingFor = uid || null;
+    try { localStorage.setItem("tasktrack.actingFor", actingFor || ""); } catch (_) {}
+    render();
   }
 
   function renderSidebarProjects() {
@@ -890,15 +915,20 @@
   const requestChip = (t) => t.source === "request" ? `<span class="chip request-chip">📨 ${esc(requesterLabel(t))}</span>` : "";
   const attentionChip = (t) => t.needsAttention ? `<span class="chip attention-chip">⚠ Needs attention</span>` : "";
   // "My tasks" = assigned to me, or a request directed to me.
+  // The identity the personal views are computed for — normally the signed-in
+  // user, but a Delegate/Admin managing someone else's desk (actingFor) sees
+  // that person's To do / My tasks / calendar instead. Actions stay authored
+  // by the real user (me.id); only the *view* changes.
+  function effectiveUid() { return actingFor || (me && me.id) || null; }
   function isMine(t) {
-    const uid = me && me.id;
+    const uid = effectiveUid();
     if (!uid) return false;
     return (assigneesByTask[t.id] || []).includes(uid) || (recipientsByTask[t.id] || []).includes(uid);
   }
   // "For me" = assigned/directed to me, OR a personal task I created that isn't
   // delegated to anyone else. Used for the personal "To do" + "My tasks" views.
   function isForMe(t) {
-    const uid = me && me.id;
+    const uid = effectiveUid();
     if (!uid) return false;
     if (isMine(t)) return true;
     return t.createdBy === uid && (assigneesByTask[t.id] || []).length === 0;
@@ -1420,7 +1450,8 @@
     $("fTitle").value = t ? t.title : "";
     $("fNotes").value = t ? t.notes || "" : "";
     fillProjectOptions(t ? t.projectId : scoped);
-    fillAssigneeOptions(t ? (assigneesByTask[t.id] || []) : []);
+    // Managing someone's desk? A new task defaults to being assigned to them.
+    fillAssigneeOptions(t ? (assigneesByTask[t.id] || []) : (actingFor ? [actingFor] : []));
     $("fPriority").value = t ? t.priority : "medium";
     $("fStatus").value = t ? t.status : "pending";
     // New task from a calendar day: prefill the date (9:00 AM), time editable.
@@ -1658,6 +1689,7 @@
   $("calFrom") && $("calFrom").addEventListener("change", (e) => { calFrom = e.target.value; renderCalendar(); });
   $("calTo") && $("calTo").addEventListener("change", (e) => { calTo = e.target.value; renderCalendar(); });
   $("gcalConnectBtn") && $("gcalConnectBtn").addEventListener("click", () => (gcalConnected ? disconnectGcal() : connectGcal()));
+  $("deskSelect") && $("deskSelect").addEventListener("change", (e) => setActingFor(e.target.value));
   searchInput.addEventListener("input", (e) => { query = e.target.value.trim().toLowerCase(); render(); });
 
   // ---- Theme (light / dark) ----

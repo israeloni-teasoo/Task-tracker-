@@ -47,6 +47,13 @@ project context._
   so requests never mix into her personal tasks. `isForMe()` drives To do / My
   tasks; `isMine()` = assignee/recipient only. Adding a task warns (but still
   allows) when another open item is scheduled at the same time (`findConflicts`).
+  **Managing another desk (PA feature):** owner/delegate get a topbar **"My desk
+  / <name>'s desk"** switcher (`actingFor`, persisted). Selecting a person makes
+  the personal views (To do / My tasks / calendar / counts) resolve to *their*
+  identity via `effectiveUid()`, and new tasks default to being assigned to them
+  — but every write stays authored by the real signed-in user (`created_by =
+  me.id`), so a PA managing the Managing Partner's desk is fully traceable. No
+  password sharing / impersonation.
 - **editor / viewer / requester → personal dashboard** (`#portalScreen`):
   "Assigned to me" (editors can change status there), a request form, and
   "My requests". They do NOT see the full team board.

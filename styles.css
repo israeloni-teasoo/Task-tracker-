@@ -359,6 +359,22 @@ body {
 .topbar-left { display: flex; align-items: center; gap: 18px; }
 #viewTitle { font-size: 20px; font-weight: 700; letter-spacing: -.3px; }
 
+.desk-switcher {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--c-bg); border: 1px solid var(--c-border);
+  border-radius: 9px; padding: 3px 8px 3px 10px;
+}
+.desk-switcher .desk-ico { font-size: 13px; }
+.desk-switcher select {
+  border: none; background: transparent; color: var(--c-text);
+  font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  padding: 3px 2px; outline: none; max-width: 180px;
+}
+.desk-switcher.acting {
+  background: var(--c-accent-soft); border-color: var(--c-accent);
+}
+.desk-switcher.acting select, .desk-switcher.acting .desk-ico { color: var(--c-accent); }
+
 .view-toggle { display: flex; background: var(--c-bg); border-radius: 9px; padding: 3px; }
 .toggle-btn {
   border: none; background: transparent; cursor: pointer;
