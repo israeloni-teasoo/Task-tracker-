@@ -300,7 +300,18 @@ body {
 }
 .filter-btn.active .count { background: var(--c-surface); color: var(--c-accent); }
 
-.sidebar-footer { margin-top: auto; display: flex; flex-direction: column; }
+/* Compact quick-filter chips (Due today / Overdue / …) — less vertical weight. */
+.quick-filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 2px; }
+.filter-btn.qf {
+  width: auto; flex: 0 1 auto; gap: 6px; padding: 5px 10px;
+  font-size: 12.5px; border-radius: 999px; border: 1px solid var(--c-border);
+}
+.filter-btn.qf .count { margin-left: 0; padding: 0 6px; min-width: 18px; font-size: 11px; background: transparent; }
+.filter-btn.qf.active { background: var(--c-accent-soft); border-color: var(--c-accent); color: var(--c-accent); }
+.filter-btn.qf.active .count { background: var(--c-surface); }
+
+.sidebar-footer { margin-top: auto; display: flex; flex-direction: column; gap: 4px; }
+.nav-action { justify-content: flex-start; text-align: left; }
 
 /* ===== Buttons ===== */
 .primary-btn {
@@ -505,12 +516,12 @@ body {
 
 /* Month grid */
 .cal-month { display: flex; flex-direction: column; }
-.cal-dow-row, .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); }
+.cal-dow-row, .cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
 .cal-dow { text-align: center; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: var(--c-text-faint); padding: 6px 0; }
 .cal-grid { gap: 6px; }
 .cal-cell {
   background: var(--c-surface); border: 1px solid var(--c-border); border-radius: 9px;
-  min-height: 96px; padding: 6px; display: flex; flex-direction: column; gap: 4px; cursor: pointer;
+  min-height: 96px; min-width: 0; padding: 6px; display: flex; flex-direction: column; gap: 4px; cursor: pointer;
   transition: box-shadow .12s;
 }
 .cal-cell:hover { box-shadow: var(--shadow-sm); }
@@ -518,12 +529,12 @@ body {
 .cal-cell.today { border-color: var(--c-accent); box-shadow: 0 0 0 1px var(--c-accent) inset; }
 .cal-cell-num { font-size: 12px; font-weight: 700; color: var(--c-text-soft); }
 .cal-cell.today .cal-cell-num { color: var(--c-accent); }
-.cal-cell-items { display: flex; flex-direction: column; gap: 3px; overflow: hidden; }
+.cal-cell-items { display: flex; flex-direction: column; gap: 3px; overflow: hidden; min-width: 0; }
 
 /* Week / day columns */
-.cal-cols { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; height: 100%; }
-.cal-cols-1 { grid-template-columns: 1fr; max-width: 560px; }
-.cal-col { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: 9px; display: flex; flex-direction: column; min-height: 160px; cursor: pointer; }
+.cal-cols { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; height: 100%; }
+.cal-cols-1 { grid-template-columns: minmax(0, 1fr); max-width: 560px; }
+.cal-col { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: 9px; display: flex; flex-direction: column; min-height: 160px; min-width: 0; cursor: pointer; }
 .cal-col.today { border-color: var(--c-accent); }
 .cal-col-head { padding: 8px; font-size: 12px; color: var(--c-text-soft); border-bottom: 1px solid var(--c-border); text-align: center; }
 .cal-col.today .cal-col-head { color: var(--c-accent); }
@@ -538,7 +549,7 @@ body {
 
 /* Task chips */
 .cal-chip {
-  display: flex; align-items: center; gap: 5px; width: 100%; text-align: left;
+  display: flex; align-items: center; gap: 5px; width: 100%; max-width: 100%; min-width: 0; text-align: left;
   background: var(--c-surface-2); border: 1px solid var(--c-border); border-left: 3px solid var(--p-low);
   border-radius: 6px; padding: 3px 6px; font-size: 12px; cursor: pointer; color: var(--c-text);
   overflow: hidden;
@@ -575,6 +586,8 @@ body {
 }
 .modal-head h3 { font-size: 16px; font-weight: 700; }
 .modal-body { padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+#settingsOverlay .modal-body { gap: 8px; }
+#settingsOverlay .settings-section-label { margin: 10px 0 4px; }
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field > span { font-size: 12.5px; font-weight: 600; color: var(--c-text-soft); }
 .field input, .field textarea, .field select {
@@ -607,8 +620,14 @@ body {
 .field-help { font-size: 11.5px; color: var(--c-text-faint); }
 
 /* Settings rows */
+/* Grouped settings cards — clearer sections, less visual noise. */
+.settings-card {
+  background: var(--c-surface-2); border: 1px solid var(--c-border);
+  border-radius: 12px; padding: 2px 14px;
+}
 .setting-row { display: flex; align-items: center; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--c-border); }
 .setting-row:last-child { border-bottom: none; }
+.settings-card .setting-row:last-child { border-bottom: none; }
 .setting-text { flex: 1; min-width: 0; }
 .setting-name { font-size: 14px; font-weight: 600; }
 .setting-sub { font-size: 12px; color: var(--c-text-faint); margin-top: 2px; }

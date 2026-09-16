@@ -1638,8 +1638,8 @@
   // ============================================================
   //  Sidebar view filters + layout toggle + search
   // ============================================================
-  document.querySelectorAll(".filters > .filter-btn").forEach((btn) => {
-    if (!btn.dataset.scope) return;   // skip action buttons like "People & roles"
+  document.querySelectorAll(".filters .filter-btn:not(.project-btn)").forEach((btn) => {
+    if (!btn.dataset.scope) return;   // skip action buttons
     btn.addEventListener("click", () => setScope(btn.dataset.scope, btn.textContent.trim().replace(/\s*\d+$/, "")));
   });
   document.querySelectorAll(".toggle-btn").forEach((btn) => {
