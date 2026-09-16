@@ -1156,12 +1156,27 @@
   async function connectGcal() {
     try {
       const { data, error } = await sb.functions.invoke("google-calendar", { body: { action: "start" } });
-      if (error) throw error;
+      if (error) throw await gcalErr(error);
       if (data && data.authUrl) { window.location.href = data.authUrl; return; }
-      throw new Error("No auth URL returned");
+      throw new Error("no authUrl returned");
     } catch (e) {
-      toast(gcalHint(e) || "Couldn't start Google sign-in. Is the google-calendar function deployed?");
+      const msg = (e && e.message) || "unknown error";
+      console.error("Google connect failed:", e);
+      toast("Google connect failed: " + msg);
     }
+  }
+  // Pull the real error text out of a Supabase FunctionsHttpError so the toast
+  // shows why (401/500/secret missing…) instead of a generic message.
+  async function gcalErr(error) {
+    let detail = (error && error.message) || "";
+    try {
+      const ctx = error && error.context;
+      if (ctx && typeof ctx.json === "function") {
+        const b = await ctx.json();
+        if (b && (b.error || b.msg)) detail = (ctx.status ? ctx.status + ": " : "") + (b.error || b.msg);
+      } else if (ctx && ctx.status) { detail = "HTTP " + ctx.status; }
+    } catch (_) { /* keep detail */ }
+    return new Error(detail || "request failed");
   }
   async function disconnectGcal() {
     if (!confirm("Disconnect Google Calendar? Your Google events will stop showing here and task sync stops.")) return;
