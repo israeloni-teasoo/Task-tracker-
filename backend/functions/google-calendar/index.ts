@@ -197,6 +197,48 @@ Deno.serve(async (req) => {
       return json({ ok: true, eventId });
     }
 
+    // Edit a Google event directly (from the in-app event detail).
+    if (action === "gevent_update") {
+      const { event_id, summary, start, allDay } = payload;
+      if (!event_id) return json({ error: "no_event" }, 400);
+      const acc = await accessTokenFor(userId);
+      if (!acc) return json({ error: "not_connected" }, 400);
+      const body: Record<string, unknown> = {};
+      if (typeof summary === "string") body.summary = summary;
+      if (start) {
+        if (allDay) {
+          body.start = { date: String(start).slice(0, 10) };
+          body.end = { date: String(start).slice(0, 10) };
+        } else {
+          const s = new Date(start);
+          body.start = { dateTime: s.toISOString() };
+          body.end = { dateTime: new Date(s.getTime() + 60 * 60 * 1000).toISOString() };
+        }
+      }
+      const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(acc.calendarId)}/events/${event_id}`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${acc.token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) { console.error("gevent_update failed", data); return json({ error: "update_failed" }, 502); }
+      return json({ ok: true });
+    }
+
+    if (action === "gevent_delete") {
+      const { event_id } = payload;
+      if (!event_id) return json({ error: "no_event" }, 400);
+      const acc = await accessTokenFor(userId);
+      if (!acc) return json({ error: "not_connected" }, 400);
+      const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(acc.calendarId)}/events/${event_id}`, {
+        method: "DELETE", headers: { Authorization: `Bearer ${acc.token}` },
+      });
+      // 410 = already gone; treat as success.
+      if (!res.ok && res.status !== 410) { console.error("gevent_delete failed", res.status); return json({ error: "delete_failed" }, 502); }
+      await admin.from("google_calendar_events").delete().eq("user_id", userId).eq("event_id", event_id);
+      return json({ ok: true });
+    }
+
     return json({ error: "unknown_action" }, 400);
   } catch (e) {
     console.error("google-calendar error", e);

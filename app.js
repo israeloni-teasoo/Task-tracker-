@@ -937,6 +937,20 @@
     setCount("overdue", overdue); setCount("attention", attention); setCount("completed", completed);
     const badge = $("mAttnBadge");
     if (badge) { badge.textContent = attention; badge.hidden = attention === 0; }
+    renderQuickView({ mine, today, overdue, attention, completed });
+  }
+  // Secondary scopes live in one compact dropdown so the sidebar stays lean.
+  const QUICK_VIEWS = [
+    { scope: "mine", label: "My tasks" }, { scope: "today", label: "Due today" },
+    { scope: "overdue", label: "Overdue" }, { scope: "attention", label: "Needs attention" },
+    { scope: "completed", label: "Completed" },
+  ];
+  function renderQuickView(counts) {
+    const sel = $("quickView"); if (!sel) return;
+    const c = counts || {};
+    sel.innerHTML = `<option value="">More views…</option>` + QUICK_VIEWS.map((v) =>
+      `<option value="${v.scope}">${v.label}${c[v.scope] != null ? ` (${c[v.scope]})` : ""}</option>`).join("");
+    sel.value = QUICK_VIEWS.some((v) => v.scope === scope) ? scope : "";
   }
   function setCount(k, n) { const el = document.querySelector(`[data-count="${k}"]`); if (el) el.textContent = n; }
 
@@ -1048,6 +1062,7 @@
   // ============================================================
   const DAY_MS = 24 * 60 * 60 * 1000;
   const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const isMobile = () => !!(window.matchMedia && window.matchMedia("(max-width: 760px)").matches);
   const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
   const dayKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -1092,25 +1107,50 @@
         <span class="cal-chip-dot" style="background:#4285f4"></span>${time ? `<span class="cal-chip-time">${time}</span>` : ""}<span class="cal-chip-title">${esc(e.summary)}</span>
       </button>`;
   }
-  // In-app detail for a Google event (modal on desktop, bottom drawer on mobile).
+  // In-app detail + edit for a Google event (modal on desktop, drawer on mobile).
+  let evCurrentId = null;
   function openEventDetail(gid) {
     const e = gcalEvents.find((x) => x.id === gid);
     if (!e) return;
-    const start = new Date(e.start), end = e.end ? new Date(e.end) : null;
-    const dateStr = isNaN(start) ? "" : start.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
-    let timeStr = "All day";
-    if (!e.allDay && !isNaN(start)) {
-      const s = start.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-      const en = end && !isNaN(end) ? end.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : "";
-      timeStr = en ? `${s} – ${en}` : s;
-    }
-    $("evTitle").textContent = e.summary || "(no title)";
-    $("evWhen").textContent = [dateStr, timeStr].filter(Boolean).join(" · ");
+    evCurrentId = gid;
+    $("evTitleInput").value = e.summary || "";
+    $("evAllDay").checked = !!e.allDay;
+    const whenInput = $("evWhenInput");
+    if (e.allDay) { whenInput.type = "date"; whenInput.value = String(e.start).slice(0, 10); }
+    else { whenInput.type = "datetime-local"; whenInput.value = toInputDateTime(e.start); }
     const link = $("evOpen");
     if (e.link) { link.href = e.link; link.hidden = false; } else { link.hidden = true; }
     show($("eventOverlay"));
   }
-  const closeEventDetail = () => hide($("eventOverlay"));
+  const closeEventDetail = () => { hide($("eventOverlay")); evCurrentId = null; };
+  async function saveEventDetail() {
+    if (!evCurrentId) return;
+    const id = evCurrentId;
+    const allDay = $("evAllDay").checked;
+    const val = $("evWhenInput").value;
+    const start = allDay ? (val ? val.slice(0, 10) : "") : fromInputDateTime(val);
+    const summary = $("evTitleInput").value.trim();
+    closeEventDetail();
+    try {
+      const { error } = await invokeGcal({ action: "gevent_update", event_id: id, summary, start, allDay });
+      if (error) throw await gcalErr(error);
+      toast("Event updated");
+      await pullGcalEvents();
+    } catch (e) { toast("Couldn't update event: " + ((e && e.message) || "error")); }
+  }
+  async function deleteEventDetail() {
+    if (!evCurrentId) return;
+    if (!confirm("Delete this event from Google Calendar?")) return;
+    const id = evCurrentId;
+    closeEventDetail();
+    try {
+      const { error } = await invokeGcal({ action: "gevent_delete", event_id: id });
+      if (error) throw await gcalErr(error);
+      gcalEvents = gcalEvents.filter((x) => x.id !== id);
+      if (view === "calendar") renderCalendar();
+      toast("Event deleted");
+    } catch (e) { toast("Couldn't delete event: " + ((e && e.message) || "error")); }
+  }
 
   function renderCalendar() {
     const body = $("calBody"), label = $("calLabel"), custom = $("calCustom");
@@ -1186,12 +1226,15 @@
       c.addEventListener("click", (e) => { e.stopPropagation(); openModal(c.dataset.id); }));
     calendarView.querySelectorAll(".cal-chip.gcal").forEach((c) =>
       c.addEventListener("click", (e) => { e.stopPropagation(); openEventDetail(c.dataset.gid); }));
-    // Clicking an empty spot in a day opens a new task prefilled to that date.
+    // Clicking an empty spot in a day: on mobile (month) drill into Day view;
+    // on desktop start a new task prefilled to that date.
     calendarView.querySelectorAll(".cal-cell, .cal-col").forEach((cell) =>
       cell.addEventListener("click", (e) => {
         if (e.target.closest(".cal-chip") || e.target.closest(".cal-more")) return;
+        const day = cell.dataset.day;
+        if (isMobile() && calMode === "month" && day) { calDate = parseDayKey(day); calMode = "day"; renderCalendar(); return; }
         if (!can.edit()) return;
-        openModal(null, cell.dataset.day);
+        openModal(null, day);
       }));
     // "+N more" jumps to that day in day-mode.
     calendarView.querySelectorAll(".cal-more").forEach((b) =>
@@ -1742,8 +1785,16 @@
   $("calTo") && $("calTo").addEventListener("change", (e) => { calTo = e.target.value; renderCalendar(); });
   $("gcalConnectBtn") && $("gcalConnectBtn").addEventListener("click", () => (gcalConnected ? disconnectGcal() : connectGcal()));
   $("deskSelect") && $("deskSelect").addEventListener("change", (e) => setActingFor(e.target.value));
+  $("quickView") && $("quickView").addEventListener("change", (e) => {
+    const v = e.target.value; if (!v) return;
+    const qv = QUICK_VIEWS.find((x) => x.scope === v);
+    setScope(v, qv ? qv.label : "Tasks");
+  });
   $("evClose") && $("evClose").addEventListener("click", closeEventDetail);
   $("eventOverlay") && $("eventOverlay").addEventListener("click", (e) => { if (e.target === $("eventOverlay")) closeEventDetail(); });
+  $("evSave") && $("evSave").addEventListener("click", saveEventDetail);
+  $("evDelete") && $("evDelete").addEventListener("click", deleteEventDetail);
+  $("evAllDay") && $("evAllDay").addEventListener("change", (e) => { $("evWhenInput").type = e.target.checked ? "date" : "datetime-local"; });
   searchInput.addEventListener("input", (e) => { query = e.target.value.trim().toLowerCase(); render(); });
 
   // ---- Theme (light / dark) ----

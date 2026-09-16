@@ -300,15 +300,13 @@ body {
 }
 .filter-btn.active .count { background: var(--c-surface); color: var(--c-accent); }
 
-/* Compact quick-filter chips (Due today / Overdue / …) — less vertical weight. */
-.quick-filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 2px; }
-.filter-btn.qf {
-  width: auto; flex: 0 1 auto; gap: 6px; padding: 5px 10px;
-  font-size: 12.5px; border-radius: 999px; border: 1px solid var(--c-border);
+/* Secondary scopes collapse into one dropdown so the sidebar stays lean. */
+.sidebar-select {
+  width: 100%; border: 1px solid var(--c-border); background: var(--c-surface);
+  color: var(--c-text-soft); border-radius: 8px; padding: 9px 10px; margin-top: 2px;
+  font: inherit; font-size: 13.5px; cursor: pointer;
 }
-.filter-btn.qf .count { margin-left: 0; padding: 0 6px; min-width: 18px; font-size: 11px; background: transparent; }
-.filter-btn.qf.active { background: var(--c-accent-soft); border-color: var(--c-accent); color: var(--c-accent); }
-.filter-btn.qf.active .count { background: var(--c-surface); }
+.sidebar-select:focus { outline: none; border-color: var(--c-accent); }
 
 .sidebar-footer { margin-top: auto; display: flex; flex-direction: column; gap: 4px; }
 .nav-action { justify-content: flex-start; text-align: left; }
@@ -513,8 +511,12 @@ body {
 .event-modal { max-width: 400px; }
 .event-badge { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; color: var(--c-text-soft); }
 .event-badge .gcal-dot { width: 9px; height: 9px; border-radius: 50%; background: #4285f4; }
-.event-when { font-size: 15px; font-weight: 600; margin: 4px 0 8px; }
-.event-open { align-self: flex-start; text-decoration: none; }
+.event-modal .field.check-row { flex-direction: row; align-items: center; gap: 8px; }
+.event-modal .field.check-row input { width: 16px; height: 16px; accent-color: var(--c-accent); }
+.event-modal .field.check-row span { font-size: 13.5px; font-weight: 500; }
+.event-actions { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.event-actions .spacer { flex: 1; }
+.event-actions .ghost-btn { text-decoration: none; }
 @media (max-width: 760px) {
   /* Detail comes up as a bottom drawer on phones. */
   #eventOverlay { align-items: flex-end; padding: 0; }
@@ -805,16 +807,18 @@ body {
   .list-view { padding-left: 14px; padding-right: 14px; }
   .calendar-view { padding-left: 14px; padding-right: 14px; }
   .cal-modes { margin-left: 0; }
-  .cal-cell { min-height: 68px; padding: 4px; }
-  .cal-cell-num { font-size: 11px; }
-  .cal-chip-title { display: none; }   /* month cells show dots only on phones */
-  .cal-chip { justify-content: center; padding: 3px; }
+  .cal-cell { min-height: 58px; padding: 5px 4px; gap: 3px; }
+  .cal-cell-num { font-size: 12px; }
+  /* Month cells show just colored dots — tap the day to open it (Day view). */
+  .cal-cell .cal-cell-items { flex-direction: row; flex-wrap: wrap; gap: 4px; align-content: flex-start; }
+  .cal-cell .cal-chip { width: auto; padding: 0; border: none; background: transparent; }
+  .cal-cell .cal-chip:hover { background: transparent; }
+  .cal-cell .cal-chip-time, .cal-cell .cal-chip-title { display: none; }
+  .cal-cell .cal-chip-dot { width: 9px; height: 9px; }
+  .cal-cell .cal-more { font-size: 10px; padding: 0; color: var(--c-text-faint); }
   .cal-cols { grid-template-columns: 1fr; }  /* week stacks into day columns */
   .cal-list-day { flex-direction: column; gap: 4px; }
   .cal-list-date { width: auto; }
-  /* Day/week/custom keep titles; only the dense month grid hides them. */
-  .cal-col .cal-chip-title, .cal-list .cal-chip-title { display: inline; }
-  .cal-col .cal-chip, .cal-list .cal-chip { justify-content: flex-start; }
 
   .mobile-nav {
     display: flex; align-items: center; justify-content: space-around;

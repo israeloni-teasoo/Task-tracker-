@@ -195,14 +195,7 @@
           <span class="count" data-count="requests">0</span>
         </button>
 
-        <p class="filters-label">Quick filters</p>
-        <div class="quick-filters">
-          <button class="filter-btn qf" data-scope="mine">My tasks <span class="count" data-count="mine">0</span></button>
-          <button class="filter-btn qf" data-scope="today">Due today <span class="count" data-count="today">0</span></button>
-          <button class="filter-btn qf" data-scope="overdue">Overdue <span class="count" data-count="overdue">0</span></button>
-          <button class="filter-btn qf" data-scope="attention">Needs attention <span class="count" data-count="attention">0</span></button>
-          <button class="filter-btn qf" data-scope="completed">Completed <span class="count" data-count="completed">0</span></button>
-        </div>
+        <select id="quickView" class="sidebar-select" aria-label="More views"></select>
 
         <div class="filters-label with-action">
           <span>Projects</span>
@@ -516,17 +509,24 @@
     </div>
   </div>
 
-  <!-- ===== Google event detail (modal on desktop, drawer on mobile) ===== -->
+  <!-- ===== Google event detail / edit (modal on desktop, drawer on mobile) ===== -->
   <div class="modal-overlay sheet-capable" id="eventOverlay" hidden>
     <div class="modal event-modal" role="dialog" aria-modal="true" aria-labelledby="evTitle">
       <div class="modal-head">
-        <h3 id="evTitle">Event</h3>
+        <h3 id="evTitle">Google event</h3>
         <button class="icon-btn" id="evClose" aria-label="Close">✕</button>
       </div>
       <div class="modal-body">
         <div class="event-badge"><span class="gcal-dot"></span> Google Calendar</div>
-        <p class="event-when" id="evWhen"></p>
-        <a class="ghost-btn event-open" id="evOpen" href="#" target="_blank" rel="noopener">Open in Google Calendar ↗</a>
+        <label class="field"><span>Title</span><input type="text" id="evTitleInput" /></label>
+        <label class="field check-row"><input type="checkbox" id="evAllDay" /> <span>All day</span></label>
+        <label class="field"><span>When</span><input type="datetime-local" id="evWhenInput" /></label>
+        <div class="event-actions">
+          <button type="button" class="danger-btn" id="evDelete">🗑 Delete</button>
+          <span class="spacer"></span>
+          <a class="ghost-btn" id="evOpen" href="#" target="_blank" rel="noopener">Open in Google ↗</a>
+          <button type="button" class="primary-btn" id="evSave">Save</button>
+        </div>
       </div>
     </div>
   </div>
