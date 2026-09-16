@@ -1153,9 +1153,20 @@
     reflectGcal();
     if (gcalConnected) pullGcalEvents();
   }
+  // Invoke the google-calendar function with the user's JWT attached explicitly
+  // (some vendored supabase-js builds don't auto-wire functions auth, which the
+  // function reads to identify the user — without it every call is a 401).
+  async function invokeGcal(body) {
+    let headers;
+    try {
+      const { data: { session } } = await sb.auth.getSession();
+      if (session && session.access_token) headers = { Authorization: `Bearer ${session.access_token}` };
+    } catch (_) { /* no session */ }
+    return sb.functions.invoke("google-calendar", headers ? { body, headers } : { body });
+  }
   async function connectGcal() {
     try {
-      const { data, error } = await sb.functions.invoke("google-calendar", { body: { action: "start" } });
+      const { data, error } = await invokeGcal({ action: "start" });
       if (error) throw await gcalErr(error);
       if (data && data.authUrl) { window.location.href = data.authUrl; return; }
       throw new Error("no authUrl returned");
@@ -1181,7 +1192,7 @@
   async function disconnectGcal() {
     if (!confirm("Disconnect Google Calendar? Your Google events will stop showing here and task sync stops.")) return;
     try {
-      const { error } = await sb.functions.invoke("google-calendar", { body: { action: "disconnect" } });
+      const { error } = await invokeGcal({ action: "disconnect" });
       if (error) throw error;
       gcalConnected = false; gcalEvents = [];
       reflectGcal();
@@ -1192,7 +1203,7 @@
   async function pullGcalEvents() {
     if (!gcalConnected || !sb) return;
     try {
-      const { data, error } = await sb.functions.invoke("google-calendar", { body: { action: "pull" } });
+      const { data, error } = await invokeGcal({ action: "pull" });
       if (error) throw error;
       gcalEvents = (data && data.events) || [];
       if (view === "calendar") renderCalendar();
@@ -1202,12 +1213,10 @@
   async function pushTaskToGcal(task, opts) {
     if (!gcalConnected || !sb || !task) return;
     try {
-      await sb.functions.invoke("google-calendar", {
-        body: { action: "push", task: {
-          id: task.id, title: task.title, notes: task.notes,
-          due: task.due, status: task.status, deleted: !!(opts && opts.deleted),
-        } },
-      });
+      await invokeGcal({ action: "push", task: {
+        id: task.id, title: task.title, notes: task.notes,
+        due: task.due, status: task.status, deleted: !!(opts && opts.deleted),
+      } });
     } catch (e) { console.warn("gcal push failed", e); }
   }
   function gcalHint(e) {
