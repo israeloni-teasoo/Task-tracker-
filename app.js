@@ -39,6 +39,7 @@
 
   // ---- State ----
   let projects = [], tasks = [], people = [];
+  let myPrincipals = [], myDelegates = [];   // delegation relationships (migration 025)
   let assigneesByTask = {}, recipientsByTask = {};   // task_id -> [user_id]
   let commentMeta = {};                              // task_id -> { count, last }
   let profilesById = {};
@@ -59,8 +60,10 @@
   const searchInput = $("search"), toastEl = $("toast"), projectListEl = $("projectList");
 
   const can = {
-    edit: () => ["owner", "delegate", "editor"].includes(myRole),
-    delete: () => ["owner", "delegate"].includes(myRole),
+    // A personal delegate (someone named as a principal's delegate) can edit too —
+    // RLS limits their writes to that principal's tasks.
+    edit: () => ["owner", "delegate", "editor"].includes(myRole) || myPrincipals.length > 0,
+    delete: () => ["owner", "delegate"].includes(myRole) || myPrincipals.length > 0,
     staff: () => ["owner", "delegate", "editor", "viewer"].includes(myRole),
   };
 
@@ -146,8 +149,8 @@
     me = session.user;
     hide(authScreen); hide(bootEl);
 
-    // Check the block-list and role in parallel (one round-trip of latency).
-    const [blocked] = await Promise.all([isBlocked(), loadRole()]);
+    // Check the block-list, role, and delegations in parallel.
+    const [blocked] = await Promise.all([isBlocked(), loadRole(), loadDelegations()]);
     if (blocked) {
       try { sessionStorage.setItem("tasktrack.removed", "1"); } catch (e) {}
       await sb.auth.signOut();   // triggers a reload via SIGNED_OUT
@@ -166,8 +169,10 @@
     appReady = true;
     hide($("pwSetupScreen"));
 
-    if (!["owner", "delegate"].includes(myRole)) {
-      // Everyone else (editor / viewer / requester) gets a personal dashboard.
+    if (!["owner", "delegate"].includes(myRole) && myPrincipals.length === 0) {
+      // Everyone else (editor / viewer / requester with no delegation) gets a
+      // personal dashboard. A user who is someone's delegate gets the full app
+      // (RLS keeps their data to their principal's tasks + their own).
       show($("portalScreen"));
       $("portalEmail").textContent = me.email || "";
       loadPortalRecipients();
@@ -375,6 +380,7 @@
     if ($("settingsAcct")) $("settingsAcct").textContent = (me && me.email) || "";
     reflectNotifState();
     reflectGcal();
+    renderMyDelegates();
     show($("settingsOverlay"));
   }
   function closeSettings() { hide($("settingsOverlay")); }
@@ -407,6 +413,17 @@
       const { data } = await sb.from("memberships").select("role").eq("user_id", me.id).maybeSingle();
       if (data && data.role) myRole = data.role;
     } catch (e) { /* keep default */ }
+  }
+
+  // Who I can manage (my principals) and who can manage me (my delegates).
+  async function loadDelegations() {
+    try {
+      const { data, error } = await sb.from("delegations").select("principal_id, delegate_id");
+      if (error) throw error;
+      const uid = me && me.id;
+      myPrincipals = (data || []).filter((d) => d.delegate_id === uid).map((d) => ({ userId: d.principal_id }));
+      myDelegates = (data || []).filter((d) => d.principal_id === uid).map((d) => ({ userId: d.delegate_id }));
+    } catch (e) { myPrincipals = []; myDelegates = []; }
   }
 
   async function loadProjects() {
@@ -853,19 +870,17 @@
     renderDeskSwitcher();
   }
 
-  // "Manage another person's desk" — only Admin/Managing Partner (owner/delegate).
-  // Refocuses the personal views on that person; actions stay authored by me.
+  // "Manage another person's desk" — only the desks I'm a delegate for
+  // (people who named me their delegate). Actions stay authored by me.
   function renderDeskSwitcher() {
     const wrap = $("deskSwitcher"), sel = $("deskSelect");
     if (!wrap || !sel) return;
-    const canManage = ["owner", "delegate"].includes(myRole);
-    wrap.hidden = !canManage;
-    if (!canManage) { actingFor = null; return; }
-    // Drop a stale selection (person removed).
-    if (actingFor && !people.some((p) => p.userId === actingFor)) actingFor = null;
-    const others = people.filter((p) => p.userId !== (me && me.id));
+    wrap.hidden = myPrincipals.length === 0;
+    if (!myPrincipals.length) { actingFor = null; return; }
+    if (actingFor && !myPrincipals.some((p) => p.userId === actingFor)) actingFor = null;
+    const nameFor = (id) => { const p = profilesById[id]; return p ? (p.name || p.email || "Principal") : "Principal"; };
     sel.innerHTML = `<option value="">My desk</option>` +
-      others.map((p) => `<option value="${esc(p.userId)}">${esc(p.name || p.email || "User")}'s desk</option>`).join("");
+      myPrincipals.map((p) => `<option value="${esc(p.userId)}">${esc(nameFor(p.userId))}'s desk</option>`).join("");
     sel.value = actingFor || "";
     wrap.classList.toggle("acting", !!actingFor);
   }
@@ -874,6 +889,46 @@
     try { localStorage.setItem("tasktrack.actingFor", actingFor || ""); } catch (_) {}
     render();
   }
+
+  // ---- My delegates (Settings) ----
+  function renderMyDelegates() {
+    const list = $("delegateList"), add = $("delegateAdd");
+    if (!list) return;
+    list.innerHTML = myDelegates.length
+      ? myDelegates.map((d) => {
+          const p = profilesById[d.userId];
+          const name = p ? (p.name || p.email || "User") : "User";
+          return `<div class="delegate-chip"><span>${esc(name)}</span><button type="button" data-del="${esc(d.userId)}" aria-label="Remove">✕</button></div>`;
+        }).join("")
+      : `<div class="ms-empty">No delegates yet. Add someone below so they can help manage your tasks.</div>`;
+    list.querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", () => removeDelegate(b.dataset.del)));
+    if (add) {
+      const taken = new Set(myDelegates.map((d) => d.userId));
+      const opts = people.filter((p) => p.userId && p.userId !== (me && me.id) && !taken.has(p.userId));
+      add.innerHTML = `<option value="">Add a delegate…</option>` +
+        opts.map((p) => `<option value="${esc(p.userId)}">${esc(p.name || p.email || "User")}</option>`).join("");
+    }
+  }
+  async function addDelegate(userId) {
+    if (!userId) return;
+    try {
+      const { error } = await sb.from("delegations").insert({ principal_id: me.id, delegate_id: userId });
+      if (error) throw error;
+      if (!myDelegates.some((d) => d.userId === userId)) myDelegates.push({ userId });
+      renderMyDelegates();
+      toast("Delegate added");
+    } catch (e) { toast("Couldn't add delegate — try again."); }
+  }
+  async function removeDelegate(userId) {
+    try {
+      const { error } = await sb.from("delegations").delete().eq("principal_id", me.id).eq("delegate_id", userId);
+      if (error) throw error;
+      myDelegates = myDelegates.filter((d) => d.userId !== userId);
+      renderMyDelegates();
+      toast("Delegate removed");
+    } catch (e) { toast("Couldn't remove delegate — try again."); }
+  }
+  $("delegateAdd") && $("delegateAdd").addEventListener("change", (e) => { const v = e.target.value; e.target.value = ""; addDelegate(v); });
 
   function renderSidebarProjects() {
     renderProjectListInto(projectListEl);

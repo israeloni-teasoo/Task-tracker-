@@ -47,12 +47,19 @@ project context._
   so requests never mix into her personal tasks. `isForMe()` drives To do / My
   tasks; `isMine()` = assignee/recipient only. Adding a task warns (but still
   allows) when another open item is scheduled at the same time (`findConflicts`).
-  **Managing another desk (PA feature):** owner/delegate get a **"My desk /
-  <name>'s desk"** switcher in the **sidebar footer** (`actingFor`, persisted). Selecting a person makes
-  the personal views (To do / My tasks / calendar / counts) resolve to *their*
-  identity via `effectiveUid()`, and new tasks default to being assigned to them
-  — but every write stays authored by the real signed-in user (`created_by =
-  me.id`), so a PA managing the Managing Partner's desk is fully traceable. No
+  **Personal delegation (PA feature, migration 025):** any user can name
+  delegate(s) in **Settings → My delegates** (`delegations` table). A delegate
+  gets **least-privilege** access to ONLY that principal's tasks (RLS:
+  `is_delegate_for_task`/`is_delegate_of` grant select/update/delete/insert +
+  assignee writes on the principal's tasks) — not the whole office. This is
+  independent of the global `delegate` role (which the Managing Partner holds for
+  full office access). A user who is anyone's delegate routes into the **full
+  app** (RLS keeps their data to their principals' tasks + their own;
+  `can.edit()` is true for them), and gets a **"My desk / <principal>'s desk"**
+  switcher in the **sidebar footer** listing ONLY their principals (`actingFor`,
+  persisted, `effectiveUid()`, `myPrincipals`/`myDelegates`). New tasks while
+  managing a desk default to that principal; every write stays authored by the
+  real signed-in user (`created_by = me.id`), so it's fully traceable. No
   password sharing / impersonation.
 - **editor / viewer / requester → personal dashboard** (`#portalScreen`):
   "Assigned to me" (editors can change status there), a request form, and
@@ -107,7 +114,10 @@ the schema but are unused/harmless.
     blocked_users (remove = revoke access; app_current_role null when blocked) ·
     024 Google Calendar sync (`google_accounts` holds the OAuth refresh token,
     server-only/no client RLS; `google_oauth_states`; `google_calendar_events`
-    read by owner+delegate; `task_gcal_links`; `google_connection()` helper).
+    read by owner+delegate; `task_gcal_links`; `google_connection()` helper) ·
+    025 personal delegations (`delegations` principal→delegate; `is_delegate_of`/
+    `is_delegate_for_task` definer helpers; additive task RLS so a delegate can
+    manage ONLY their principal's tasks; each user manages their own in Settings).
 - Notification config lives in the RLS-locked `public.app_settings`
   (`push_fn_url`, `push_webhook_secret`) — never in the repo.
 

@@ -200,6 +200,16 @@ create table public.task_gcal_links (
   updated_at      timestamptz not null default now()
 );
 
+-- ---------- Personal delegation (migration 025) ----------
+-- A principal names delegate(s) who can manage ONLY that principal's tasks.
+create table public.delegations (
+  principal_id uuid not null references public.profiles(id) on delete cascade,
+  delegate_id  uuid not null references public.profiles(id) on delete cascade,
+  created_at   timestamptz not null default now(),
+  primary key (principal_id, delegate_id),
+  check (principal_id <> delegate_id)
+);
+
 -- ---------- Role helper functions ----------
 -- security definer so they read `memberships` without tripping RLS recursion.
 
@@ -257,6 +267,25 @@ returns boolean language sql stable security definer set search_path = public as
   select exists (select 1 from public.tasks where id = p_task and requester_id = p_user)
       or public.is_assignee(p_task, p_user)
       or public.is_recipient(p_task, p_user);
+$$;
+
+-- Delegation helpers (migration 025). Definer so they bypass RLS (no recursion).
+create or replace function public.is_delegate_of(p_principal uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.delegations where delegate_id = auth.uid() and principal_id = p_principal);
+$$;
+create or replace function public.is_delegate_for_task(p_task uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from public.delegations d
+    where d.delegate_id = auth.uid()
+      and (
+        exists (select 1 from public.tasks t where t.id = p_task
+                  and (t.created_by = d.principal_id or t.requester_id = d.principal_id))
+        or public.is_assignee(p_task, d.principal_id)
+        or public.is_recipient(p_task, d.principal_id)
+      )
+  );
 $$;
 
 -- ---------- New-user bootstrap ----------
@@ -431,6 +460,7 @@ alter table public.google_accounts      enable row level security;   -- no polic
 alter table public.google_oauth_states  enable row level security;   -- no policies: server-only
 alter table public.task_gcal_links       enable row level security;   -- no policies: server-only
 alter table public.google_calendar_events enable row level security;
+alter table public.delegations           enable row level security;
 
 -- profiles: any signed-in colleague can read names/emails (for comment authors,
 -- assignees, recipients); you can edit only your own.
@@ -503,6 +533,19 @@ create policy tasks_update_staff on public.tasks for update
 create policy tasks_delete_staff on public.tasks for delete
   using (public.can_delete());
 
+-- Delegates: access limited to their principal's tasks (migration 025).
+create policy tasks_select_delegate on public.tasks for select
+  using (public.is_delegate_for_task(id));
+create policy tasks_update_delegate on public.tasks for update
+  using (public.is_delegate_for_task(id)) with check (public.is_delegate_for_task(id));
+create policy tasks_delete_delegate on public.tasks for delete
+  using (public.is_delegate_for_task(id));
+create policy tasks_insert_delegate on public.tasks for insert
+  with check (
+    created_by = auth.uid() and source = 'internal'
+    and exists (select 1 from public.delegations where delegate_id = auth.uid())
+  );
+
 -- task_events: readable/insertable by staff or anyone attached to the task.
 create policy events_select on public.task_events for select
   using (public.is_staff() or public.is_task_participant(task_id, auth.uid()));
@@ -520,11 +563,19 @@ create policy att_meta_insert_staff on public.task_attachments for insert
 create policy task_assignees_select on public.task_assignees for select
   using (public.is_staff() or user_id = auth.uid());
 create policy task_assignees_write on public.task_assignees for all
-  using (public.can_edit()) with check (public.can_edit());
+  using (public.can_edit() or public.is_delegate_for_task(task_id))
+  with check (public.can_edit() or public.is_delegate_of(user_id) or public.is_delegate_for_task(task_id));
 create policy task_recipients_select on public.task_recipients for select
   using (public.is_staff() or user_id = auth.uid());
 create policy task_recipients_write on public.task_recipients for all
   using (public.is_staff()) with check (public.is_staff());
+
+-- delegations: see rows where you're principal or delegate; manage your own.
+create policy delegations_select on public.delegations for select
+  using (principal_id = auth.uid() or delegate_id = auth.uid() or public.is_owner());
+create policy delegations_manage on public.delegations for all
+  using (principal_id = auth.uid() or public.is_owner())
+  with check (principal_id = auth.uid() or public.is_owner());
 
 -- push_subscriptions: you manage only your own devices.
 create policy push_own on public.push_subscriptions for all

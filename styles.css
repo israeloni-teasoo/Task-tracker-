@@ -517,6 +517,14 @@ body {
 .event-actions { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .event-actions .spacer { flex: 1; }
 .event-actions .ghost-btn { text-decoration: none; }
+
+/* My delegates (Settings) */
+.delegate-list { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 0; }
+.delegate-chip { display: inline-flex; align-items: center; gap: 8px; background: var(--c-accent-soft); color: var(--c-accent); border-radius: 999px; padding: 5px 6px 5px 12px; font-size: 13px; font-weight: 600; }
+.delegate-chip button { border: none; background: transparent; color: inherit; cursor: pointer; font-size: 13px; line-height: 1; padding: 2px 4px; border-radius: 50%; }
+.delegate-chip button:hover { background: rgba(0,0,0,.08); }
+.delegate-add-row { padding-top: 6px; }
+.delegate-add-row .filter-select { width: 100%; max-width: none; }
 @media (max-width: 760px) {
   /* Detail comes up as a bottom drawer on phones. */
   #eventOverlay { align-items: flex-end; padding: 0; }
