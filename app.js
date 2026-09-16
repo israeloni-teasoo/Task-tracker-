@@ -873,16 +873,18 @@
   // "Manage another person's desk" — only the desks I'm a delegate for
   // (people who named me their delegate). Actions stay authored by me.
   function renderDeskSwitcher() {
-    const wrap = $("deskSwitcher"), sel = $("deskSelect");
-    if (!wrap || !sel) return;
-    wrap.hidden = myPrincipals.length === 0;
-    if (!myPrincipals.length) { actingFor = null; return; }
-    if (actingFor && !myPrincipals.some((p) => p.userId === actingFor)) actingFor = null;
+    const has = myPrincipals.length > 0;
+    if (has && actingFor && !myPrincipals.some((p) => p.userId === actingFor)) actingFor = null;
+    if (!has) actingFor = null;
     const nameFor = (id) => { const p = profilesById[id]; return p ? (p.name || p.email || "Principal") : "Principal"; };
-    sel.innerHTML = `<option value="">My desk</option>` +
+    const opts = `<option value="">My desk</option>` +
       myPrincipals.map((p) => `<option value="${esc(p.userId)}">${esc(nameFor(p.userId))}'s desk</option>`).join("");
-    sel.value = actingFor || "";
-    wrap.classList.toggle("acting", !!actingFor);
+    [["deskSwitcher", "deskSelect"], ["mDeskSwitcher", "mDeskSelect"]].forEach(([w, s]) => {
+      const wrap = $(w), sel = $(s);
+      if (!wrap || !sel) return;
+      wrap.hidden = !has;
+      if (has) { sel.innerHTML = opts; sel.value = actingFor || ""; wrap.classList.toggle("acting", !!actingFor); }
+    });
   }
   function setActingFor(uid) {
     actingFor = uid || null;
@@ -1978,6 +1980,7 @@
   $("calTo") && $("calTo").addEventListener("change", (e) => { calTo = e.target.value; renderCalendar(); });
   $("gcalConnectBtn") && $("gcalConnectBtn").addEventListener("click", () => (gcalConnected ? disconnectGcal() : connectGcal()));
   $("deskSelect") && $("deskSelect").addEventListener("change", (e) => setActingFor(e.target.value));
+  $("mDeskSelect") && $("mDeskSelect").addEventListener("change", (e) => { setActingFor(e.target.value); if (typeof closeSheet === "function") closeSheet(); });
   $("quickView") && $("quickView").addEventListener("change", (e) => {
     const v = e.target.value; if (!v) return;
     const qv = QUICK_VIEWS.find((x) => x.scope === v);
@@ -2015,7 +2018,7 @@
   // ---- Mobile bottom nav + "More" sheet ----
   const moreSheet = $("moreSheet");
   const SCOPE_TITLE = { todo: "To do", all: "All tasks", mine: "My tasks", requests: "Office requests", today: "Due today", overdue: "Overdue", attention: "Needs attention", completed: "Completed log" };
-  function openSheet() { renderSidebarProjects(); show(moreSheet); }
+  function openSheet() { renderSidebarProjects(); renderDeskSwitcher(); show(moreSheet); }
   function closeSheet() { if (moreSheet) moreSheet.hidden = true; }
 
   document.querySelectorAll(".mnav-btn[data-mscope]").forEach((b) => {

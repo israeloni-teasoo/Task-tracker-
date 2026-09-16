@@ -372,6 +372,7 @@ body {
   background: var(--c-accent-soft); border-color: var(--c-accent);
 }
 .desk-switcher.acting select, .desk-switcher.acting .desk-ico { color: var(--c-accent); }
+#mDeskSwitcher { margin: 6px 0 10px; }
 
 .view-toggle { display: flex; background: var(--c-bg); border-radius: 9px; padding: 3px; }
 .toggle-btn {
