@@ -561,12 +561,12 @@ create policy att_meta_insert_staff on public.task_attachments for insert
 -- task_assignees / task_recipients: staff or the request owner may read;
 -- staff manage assignees (editor+) and recipients.
 create policy task_assignees_select on public.task_assignees for select
-  using (public.is_staff() or user_id = auth.uid());
+  using (public.is_staff() or user_id = auth.uid() or public.is_delegate_for_task(task_id));
 create policy task_assignees_write on public.task_assignees for all
   using (public.can_edit() or public.is_delegate_for_task(task_id))
   with check (public.can_edit() or public.is_delegate_of(user_id) or public.is_delegate_for_task(task_id));
 create policy task_recipients_select on public.task_recipients for select
-  using (public.is_staff() or user_id = auth.uid());
+  using (public.is_staff() or user_id = auth.uid() or public.is_delegate_for_task(task_id));
 create policy task_recipients_write on public.task_recipients for all
   using (public.is_staff()) with check (public.is_staff());
 
@@ -594,7 +594,11 @@ create policy blocked_manage on public.blocked_users for all
 
 -- google_calendar_events: owner sees their own; Admin + delegates (MP + PA) see all.
 create policy gcal_events_read on public.google_calendar_events for select
-  using (user_id = auth.uid() or public.is_owner() or public.app_current_role() = 'delegate');
+  using (
+    user_id = auth.uid() or public.is_owner()
+    or public.app_current_role() = 'delegate'
+    or public.is_delegate_of(user_id)
+  );
 
 -- reminders: staff (editor+) manage reminders.
 create policy reminders_staff on public.reminders for all

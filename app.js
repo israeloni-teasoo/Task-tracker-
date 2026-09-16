@@ -862,11 +862,11 @@
     const editor = can.edit();
     $("newTaskBtn").style.display = editor ? "" : "none";
     $("newProjectBtn").style.display = editor ? "" : "none";
-    $("peopleBtn").hidden = !canManagePeople();
+    $("peopleBtn").hidden = myRole !== "owner";   // People & roles is Admin-only
     // mobile equivalents
     $("mAddBtn").style.display = editor ? "" : "none";
     $("mNewProjectBtn").style.display = editor ? "" : "none";
-    $("mPeopleBtn").hidden = !canManagePeople();
+    $("mPeopleBtn").hidden = myRole !== "owner";
     renderDeskSwitcher();
   }
 
@@ -887,6 +887,7 @@
   function setActingFor(uid) {
     actingFor = uid || null;
     try { localStorage.setItem("tasktrack.actingFor", actingFor || ""); } catch (_) {}
+    loadCalendarEvents();   // show the newly-selected desk's Google events
     render();
   }
 
@@ -1207,6 +1208,81 @@
     } catch (e) { toast("Couldn't delete event: " + ((e && e.message) || "error")); }
   }
 
+  // ---- Google-Calendar-style day view (time grid) ----
+  const HOUR_H = 48;   // px per hour
+  function dayItems(date) {
+    const key = dayKey(date), out = [];
+    visibleTasks().forEach((t) => {
+      if (!t.due) return;
+      const d = new Date(t.due);
+      if (isNaN(d) || dayKey(d) !== key) return;
+      const timed = hasTimePart(t.due);
+      const s = STATUSES.find((x) => x.key === t.status);
+      out.push({ kind: "task", id: t.id, title: t.title, color: s ? s.color : "#94a3b8",
+        priority: t.priority, done: t.status === "completed",
+        start: d, end: new Date(d.getTime() + 60 * 60000), timed });
+    });
+    gcalEvents.forEach((e) => {
+      const d = new Date(e.start);
+      if (isNaN(d) || dayKey(d) !== key) return;
+      const end = e.end ? new Date(e.end) : new Date(d.getTime() + 60 * 60000);
+      out.push({ kind: "gcal", id: e.id, title: e.summary || "(no title)", color: "#4285f4",
+        start: d, end, timed: !e.allDay });
+    });
+    return out;
+  }
+  // Assign side-by-side columns to overlapping timed events.
+  function packColumns(items) {
+    const timed = items.filter((i) => i.timed).sort((a, b) => a.start - b.start || a.end - b.end);
+    let cluster = [], clusterEnd = 0;
+    const flush = () => {
+      const colEnds = [];
+      cluster.forEach((ev) => {
+        let c = 0;
+        for (; c < colEnds.length; c++) if (colEnds[c] <= ev.start.getTime()) break;
+        ev._col = c; colEnds[c] = ev.end.getTime();
+      });
+      cluster.forEach((ev) => (ev._cols = colEnds.length));
+      cluster = [];
+    };
+    timed.forEach((ev) => {
+      if (cluster.length && ev.start.getTime() >= clusterEnd) { flush(); clusterEnd = 0; }
+      cluster.push(ev);
+      clusterEnd = Math.max(clusterEnd, ev.end.getTime());
+    });
+    if (cluster.length) flush();
+    return timed;
+  }
+  function renderDayGrid(date) {
+    const items = dayItems(date);
+    const allDay = items.filter((i) => !i.timed);
+    const timed = packColumns(items);
+    const hours = [];
+    for (let h = 0; h < 24; h++) {
+      const lbl = h === 0 ? "12 AM" : h < 12 ? `${h} AM` : h === 12 ? "12 PM" : `${h - 12} PM`;
+      hours.push(`<div class="cal-hour" style="height:${HOUR_H}px"><span class="cal-hour-lbl">${lbl}</span></div>`);
+    }
+    const blocks = timed.map((ev) => {
+      const top = (ev.start.getHours() * 60 + ev.start.getMinutes()) / 60 * HOUR_H;
+      const h = Math.max((ev.end - ev.start) / 60000 / 60 * HOUR_H, 24);
+      const w = 100 / (ev._cols || 1), left = (ev._col || 0) * w;
+      const time = ev.start.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+      return `<button class="cal-ev ${ev.kind} ${ev.done ? "done" : ""}" data-kind="${ev.kind}" data-id="${esc(ev.id)}"
+        style="top:${top}px;height:${h}px;left:calc(${left}% + 2px);width:calc(${w}% - 4px);--evc:${ev.color}">
+        <span class="cal-ev-title">${esc(ev.title)}</span><span class="cal-ev-time">${time}</span></button>`;
+    }).join("");
+    const allDayHtml = allDay.length
+      ? allDay.map((ev) => `<button class="cal-allday-chip ${ev.kind}" data-kind="${ev.kind}" data-id="${esc(ev.id)}" style="--evc:${ev.color}">${esc(ev.title)}</button>`).join("")
+      : `<span class="cal-allday-empty">No all-day items</span>`;
+    return `<div class="cal-day">
+        <div class="cal-day-allday"><span class="cal-allday-label">All-day</span><div class="cal-allday-items">${allDayHtml}</div></div>
+        <div class="cal-day-grid" id="calDayScroll">
+          <div class="cal-day-hours">${hours.join("")}</div>
+          <div class="cal-day-track" style="height:${24 * HOUR_H}px">${blocks}</div>
+        </div>
+      </div>`;
+  }
+
   function renderCalendar() {
     const body = $("calBody"), label = $("calLabel"), custom = $("calCustom");
     if (!body) return;
@@ -1232,7 +1308,7 @@
       body.innerHTML = `<div class="cal-cols">${days.map((d) => calDayColumn(d, byDay, gByDay)).join("")}</div>`;
     } else if (calMode === "day") {
       label.textContent = calDate.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
-      body.innerHTML = `<div class="cal-cols cal-cols-1">${calDayColumn(calDate, byDay, gByDay)}</div>`;
+      body.innerHTML = renderDayGrid(calDate);
     } else { // custom range
       const from = calFrom ? parseDayKey(calFrom) : startOfDay(calDate);
       const to = calTo ? parseDayKey(calTo) : from;
@@ -1297,6 +1373,20 @@
         e.stopPropagation();
         calDate = parseDayKey(b.dataset.day); calMode = "day"; renderCalendar();
       }));
+    // Day-view time-grid blocks + all-day chips.
+    calendarView.querySelectorAll(".cal-ev, .cal-allday-chip").forEach((b) =>
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (b.dataset.kind === "gcal") openEventDetail(b.dataset.id);
+        else openModal(b.dataset.id);
+      }));
+    // Auto-scroll the day grid to ~7am (or first event) so it opens usefully.
+    const scroll = $("calDayScroll");
+    if (scroll) {
+      const first = calendarView.querySelector(".cal-ev");
+      const top = first ? Math.max(parseFloat(first.style.top) - HOUR_H, 0) : 7 * HOUR_H;
+      scroll.scrollTop = top;
+    }
   }
 
   function calStep(dir) {
@@ -1332,6 +1422,22 @@
     } catch (e) { gcalConnected = false; }
     reflectGcal();
     if (gcalConnected) pullGcalEvents();
+    else loadCalendarEvents();   // still show a principal's cached events when managing their desk
+  }
+  // Load the cached Google events for the CURRENTLY VIEWED desk (mine, or a
+  // principal's when managing it) straight from the table (RLS-scoped).
+  async function loadCalendarEvents() {
+    const uid = effectiveUid();
+    if (!uid || !sb) { gcalEvents = []; return; }
+    try {
+      const { data, error } = await sb.from("google_calendar_events")
+        .select("event_id, summary, starts_at, ends_at, all_day, html_link").eq("user_id", uid);
+      if (error) throw error;
+      gcalEvents = (data || []).map((e) => ({
+        id: e.event_id, summary: e.summary, start: e.starts_at, end: e.ends_at, allDay: e.all_day, link: e.html_link,
+      }));
+    } catch (e) { gcalEvents = []; }
+    if (view === "calendar") renderCalendar();
   }
   // Invoke the google-calendar function with the user's JWT attached explicitly
   // (some vendored supabase-js builds don't auto-wire functions auth, which the
@@ -1381,13 +1487,13 @@
     } catch (e) { toast("Couldn't disconnect — try again."); }
   }
   async function pullGcalEvents() {
-    if (!gcalConnected || !sb) return;
+    if (!gcalConnected || !sb) { loadCalendarEvents(); return; }
     try {
-      const { data, error } = await invokeGcal({ action: "pull" });
+      // Refresh my own cache from Google, then load whichever desk is in view.
+      const { error } = await invokeGcal({ action: "pull" });
       if (error) throw error;
-      gcalEvents = (data && data.events) || [];
-      if (view === "calendar") renderCalendar();
     } catch (e) { console.warn("gcal pull failed", e); }
+    loadCalendarEvents();
   }
   // Mirror a task into Google (create/update, or remove on complete/delete).
   async function pushTaskToGcal(task, opts) {
@@ -2060,7 +2166,8 @@
     const role = $("inviteRole").value;
     if (!email) return;
     const btn = e.target.querySelector('button[type="submit"]');
-    if (btn) btn.disabled = true;
+    let btnLabel = "";
+    if (btn) { btnLabel = btn.textContent; btn.disabled = true; btn.classList.add("loading"); btn.textContent = "Adding…"; }
     try {
       // Already an active member → just update their role.
       const existing = people.find((p) => (p.email || "").toLowerCase() === email);
@@ -2110,7 +2217,7 @@
     } catch (err) {
       toast((err && err.message) || "Couldn't send the invite — are you the Admin?");
     } finally {
-      if (btn) btn.disabled = false;
+      if (btn) { btn.disabled = false; btn.classList.remove("loading"); btn.textContent = btnLabel; }
     }
   });
 

@@ -28,9 +28,10 @@ project context._
   sets this herself on the first-sign-in name+password screen).
 - First user to ever sign up becomes `owner` automatically.
 - Default role for a new sign-up with no invite = `requester`.
-- **People management** (invite / change role / remove) is available to `owner`
-  AND `delegate`, but a delegate can never touch an `owner` row or grant `owner`
-  (enforced in RLS, migration 016). Invites capture **email + role only** — the
+- **People management** (invite / change role / remove): the **People & roles**
+  nav entry is shown to **`owner` only** (Admin). RLS still permits `delegate`
+  too (migration 016; a delegate can never touch an `owner` row or grant `owner`),
+  but the UI entry is Admin-only. Invites capture **email + role only** — the
   person sets their own name on first sign-in.
 
 ### What each role sees (routing in `continueIntoApp`)
@@ -38,9 +39,14 @@ project context._
   People & roles, Settings). Three layouts share the same scope/filters via the
   topbar toggle: **Board**, **List**, and **Calendar** (`view` = board/list/
   calendar in `render()`). The Calendar (`renderCalendar()`) has **month / week
-  / day / custom-range** modes (`calMode`, `calDate`, `calFrom`/`calTo`); it lays
-  the active scope's dated tasks onto a grid, chips open the task modal, clicking
-  an empty day opens a new task prefilled to 9 AM that day. The default **To do**
+  / day / custom-range** modes (`calMode`, `calDate`, `calFrom`/`calTo`). Month/
+  week are grids of chips; **Day is a Google-style time grid** (`renderDayGrid`,
+  `HOUR_H`, `packColumns` for side-by-side overlaps, all-day strip on top). Task
+  chips open the task modal, Google chips open the event modal, clicking an empty
+  day (desktop) opens a new task at 9 AM; on mobile month shows dots and tapping a
+  day drills into Day view. The calendar overlays the active desk's Google events
+  (`loadCalendarEvents` reads the cached `google_calendar_events` for
+  `effectiveUid()`). The default **To do**
   view is PERSONAL — only tasks assigned/directed to them or that they created for
   themselves (unassigned); the **All tasks** view is the office-wide list of
   everyone's tasks; **Office requests** is its own scope (`source === "request"`)
@@ -117,7 +123,9 @@ the schema but are unused/harmless.
     read by owner+delegate; `task_gcal_links`; `google_connection()` helper) ·
     025 personal delegations (`delegations` principal→delegate; `is_delegate_of`/
     `is_delegate_for_task` definer helpers; additive task RLS so a delegate can
-    manage ONLY their principal's tasks; each user manages their own in Settings).
+    manage ONLY their principal's tasks; each user manages their own in Settings) ·
+    026 delegate visibility (task_assignees/task_recipients select + gcal read
+    extended with delegation so a switched-in delegate actually sees the desk).
 - Notification config lives in the RLS-locked `public.app_settings`
   (`push_fn_url`, `push_webhook_secret`) — never in the repo.
 
