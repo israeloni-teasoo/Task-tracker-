@@ -517,6 +517,9 @@ body {
 .event-actions { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .event-actions .spacer { flex: 1; }
 .event-actions .ghost-btn { text-decoration: none; }
+.ev-platform-label { font-size: 12px; font-weight: 700; color: var(--c-text-soft); margin-top: 4px; }
+.ev-platform-label span { font-weight: 400; color: var(--c-text-faint); }
+.event-modal .check-list { max-height: 130px; overflow-y: auto; border: 1px solid var(--c-border); border-radius: 8px; padding: 4px 8px; }
 
 /* My delegates (Settings) */
 .delegate-list { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 0; }

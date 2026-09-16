@@ -210,6 +210,20 @@ create table public.delegations (
   check (principal_id <> delegate_id)
 );
 
+-- ---------- Platform metadata on Google events (migration 027) ----------
+create table public.gcal_event_meta (
+  user_id    uuid not null references public.profiles(id) on delete cascade,
+  event_id   text not null,
+  project_id uuid references public.projects(id) on delete set null,
+  priority   text,
+  status     text,
+  assignees  uuid[] not null default '{}',
+  notes      text,
+  updated_by uuid references public.profiles(id),
+  updated_at timestamptz not null default now(),
+  primary key (user_id, event_id)
+);
+
 -- ---------- Role helper functions ----------
 -- security definer so they read `memberships` without tripping RLS recursion.
 
@@ -461,6 +475,7 @@ alter table public.google_oauth_states  enable row level security;   -- no polic
 alter table public.task_gcal_links       enable row level security;   -- no policies: server-only
 alter table public.google_calendar_events enable row level security;
 alter table public.delegations           enable row level security;
+alter table public.gcal_event_meta       enable row level security;
 
 -- profiles: any signed-in colleague can read names/emails (for comment authors,
 -- assignees, recipients); you can edit only your own.
@@ -576,6 +591,11 @@ create policy delegations_select on public.delegations for select
 create policy delegations_manage on public.delegations for all
   using (principal_id = auth.uid() or public.is_owner())
   with check (principal_id = auth.uid() or public.is_owner());
+
+-- gcal_event_meta: same audience as the event (owner / admin / role-delegate / personal delegate).
+create policy gcal_meta_rw on public.gcal_event_meta for all
+  using (user_id = auth.uid() or public.is_owner() or public.app_current_role() = 'delegate' or public.is_delegate_of(user_id))
+  with check (user_id = auth.uid() or public.is_owner() or public.app_current_role() = 'delegate' or public.is_delegate_of(user_id));
 
 -- push_subscriptions: you manage only your own devices.
 create policy push_own on public.push_subscriptions for all

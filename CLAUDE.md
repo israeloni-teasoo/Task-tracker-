@@ -125,7 +125,9 @@ the schema but are unused/harmless.
     `is_delegate_for_task` definer helpers; additive task RLS so a delegate can
     manage ONLY their principal's tasks; each user manages their own in Settings) ·
     026 delegate visibility (task_assignees/task_recipients select + gcal read
-    extended with delegation so a switched-in delegate actually sees the desk).
+    extended with delegation so a switched-in delegate actually sees the desk) ·
+    027 gcal_event_meta (platform-only project/priority/status/assignees/notes on
+    a Google event, keyed by calendar owner + event id; same audience RLS).
 - Notification config lives in the RLS-locked `public.app_settings`
   (`push_fn_url`, `push_webhook_secret`) — never in the repo.
 
@@ -148,8 +150,11 @@ the schema but are unused/harmless.
   `disconnect`. Deploy with `--no-verify-jwt`. Secrets: `GOOGLE_CLIENT_ID`,
   `GOOGLE_CLIENT_SECRET`, `APP_URL`. Setup: `docs/GOOGLE-CALENDAR.md`.
   Frontend: Settings → Google Calendar (connect/disconnect); events overlay the
-  Calendar view as blue chips that open an in-app detail modal/drawer
-  (`openEventDetail`, `#eventOverlay`); `pushTaskToGcal()` fires on task
+  Calendar view as chips that open an in-app detail modal/drawer
+  (`openEventDetail`, `#eventOverlay`) where you can edit title/time, delete, AND
+  set **platform-only** project/priority/status/assignees/notes stored in
+  `gcal_event_meta` (`gcalMeta`, migration 027) — these don't sync to Google but
+  colour the chip by priority; `pushTaskToGcal()` fires on task
   create/update/delete. `findConflicts()` (new-task same-time warning) checks
   BOTH platform tasks AND Google events, so real calendar clashes are caught.
   (Topbar has no refresh button — data auto-refreshes on focus/visibility/poll/

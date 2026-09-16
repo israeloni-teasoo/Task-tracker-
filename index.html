@@ -535,6 +535,30 @@
         <label class="field"><span>Title</span><input type="text" id="evTitleInput" /></label>
         <label class="field check-row"><input type="checkbox" id="evAllDay" /> <span>All day</span></label>
         <label class="field"><span>When</span><input type="datetime-local" id="evWhenInput" /></label>
+        <p class="ev-platform-label">Platform details <span>(kept in TaskTrack, not sent to Google)</span></p>
+        <div class="field-row">
+          <label class="field"><span>Project</span><select id="evProject"></select></label>
+          <label class="field"><span>Priority</span>
+            <select id="evPriority">
+              <option value="">—</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
+          </label>
+        </div>
+        <label class="field"><span>Status</span>
+          <select id="evStatus">
+            <option value="">—</option>
+            <option value="pending">Pending</option>
+            <option value="inprogress">In Progress</option>
+            <option value="blocked">Blocked</option>
+            <option value="onhold">On Hold</option>
+            <option value="completed">Completed</option>
+          </select>
+        </label>
+        <label class="field"><span>Assign to</span><div id="evAssignees" class="check-list"></div></label>
+        <label class="field"><span>Notes</span><textarea id="evNotes" rows="2"></textarea></label>
         <div class="event-actions">
           <button type="button" class="danger-btn" id="evDelete">🗑 Delete</button>
           <span class="spacer"></span>
@@ -586,7 +610,6 @@
           <input type="email" id="inviteEmail" placeholder="Add someone by email…" autocomplete="off" />
           <select id="inviteRole">
             <option value="owner">Admin</option>
-            <option value="delegate">Delegate</option>
             <option value="editor">Editor</option>
             <option value="viewer">Viewer</option>
             <option value="requester" selected>Staff</option>

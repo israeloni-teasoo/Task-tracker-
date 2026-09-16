@@ -46,7 +46,7 @@
   let me = null, myRole = "requester";
   let scope = "todo", view = "list", query = "";
   let calMode = "month", calDate = new Date(), calFrom = "", calTo = "";
-  let gcalConnected = false, gcalEvents = [];
+  let gcalConnected = false, gcalEvents = [], gcalMeta = {};
   let actingFor = null;   // user id whose "desk" a Delegate/Admin is managing, else null
   let filters = { priority: "", assignee: [], requester: [], dept: "", due: "" };
   let appReady = false, realtimeChannel = null;
@@ -1156,11 +1156,13 @@
     });
     return map;
   }
+  const PRIO_COLOR = { high: "var(--p-high)", medium: "var(--p-medium)", low: "var(--p-low)" };
+  const gcalColor = (e) => (e && e.priority && PRIO_COLOR[e.priority]) || "#4285f4";
   function gcalChip(e) {
     const d = new Date(e.start);
     const time = (!e.allDay && !isNaN(d)) ? d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : "";
     return `<button class="cal-chip gcal" data-gid="${esc(e.id)}" title="Google: ${esc(e.summary)}${time ? " · " + time : ""}">
-        <span class="cal-chip-dot" style="background:#4285f4"></span>${time ? `<span class="cal-chip-time">${time}</span>` : ""}<span class="cal-chip-title">${esc(e.summary)}</span>
+        <span class="cal-chip-dot" style="background:${gcalColor(e)}"></span>${time ? `<span class="cal-chip-time">${time}</span>` : ""}<span class="cal-chip-title">${esc(e.summary)}</span>
       </button>`;
   }
   // In-app detail + edit for a Google event (modal on desktop, drawer on mobile).
@@ -1176,6 +1178,14 @@
     else { whenInput.type = "datetime-local"; whenInput.value = toInputDateTime(e.start); }
     const link = $("evOpen");
     if (e.link) { link.href = e.link; link.hidden = false; } else { link.hidden = true; }
+    // Platform metadata (project/priority/status/assignees/notes — kept in TaskTrack).
+    const m = gcalMeta[gid] || {};
+    if ($("evProject")) $("evProject").innerHTML = `<option value="">— No project —</option>` +
+      projects.map((p) => `<option value="${p.id}" ${p.id === (m.project_id || "") ? "selected" : ""}>${esc(p.name)}</option>`).join("");
+    if ($("evPriority")) $("evPriority").value = m.priority || "";
+    if ($("evStatus")) $("evStatus").value = m.status || "";
+    if ($("evNotes")) $("evNotes").value = m.notes || "";
+    fillAssigneeOptions(m.assignees || [], "evAssignees");
     show($("eventOverlay"));
   }
   const closeEventDetail = () => { hide($("eventOverlay")); evCurrentId = null; };
@@ -1186,10 +1196,21 @@
     const val = $("evWhenInput").value;
     const start = allDay ? (val ? val.slice(0, 10) : "") : fromInputDateTime(val);
     const summary = $("evTitleInput").value.trim();
+    // Platform metadata to persist alongside the Google edit.
+    const meta = {
+      user_id: effectiveUid(), event_id: id,
+      project_id: ($("evProject") && $("evProject").value) || null,
+      priority: ($("evPriority") && $("evPriority").value) || null,
+      status: ($("evStatus") && $("evStatus").value) || null,
+      assignees: Array.from(document.querySelectorAll("#evAssignees input:checked")).map((c) => c.value),
+      notes: (($("evNotes") && $("evNotes").value) || "").trim() || null,
+      updated_by: me.id, updated_at: new Date().toISOString(),
+    };
     closeEventDetail();
     try {
       const { error } = await invokeGcal({ action: "gevent_update", event_id: id, summary, start, allDay });
       if (error) throw await gcalErr(error);
+      try { await sb.from("gcal_event_meta").upsert(meta, { onConflict: "user_id,event_id" }); } catch (_) {}
       toast("Event updated");
       await pullGcalEvents();
     } catch (e) { toast("Couldn't update event: " + ((e && e.message) || "error")); }
@@ -1202,6 +1223,7 @@
     try {
       const { error } = await invokeGcal({ action: "gevent_delete", event_id: id });
       if (error) throw await gcalErr(error);
+      try { await sb.from("gcal_event_meta").delete().eq("user_id", effectiveUid()).eq("event_id", id); } catch (_) {}
       gcalEvents = gcalEvents.filter((x) => x.id !== id);
       if (view === "calendar") renderCalendar();
       toast("Event deleted");
@@ -1226,7 +1248,7 @@
       const d = new Date(e.start);
       if (isNaN(d) || dayKey(d) !== key) return;
       const end = e.end ? new Date(e.end) : new Date(d.getTime() + 60 * 60000);
-      out.push({ kind: "gcal", id: e.id, title: e.summary || "(no title)", color: "#4285f4",
+      out.push({ kind: "gcal", id: e.id, title: e.summary || "(no title)", color: gcalColor(e),
         start: d, end, timed: !e.allDay });
     });
     return out;
@@ -1436,7 +1458,15 @@
       gcalEvents = (data || []).map((e) => ({
         id: e.event_id, summary: e.summary, start: e.starts_at, end: e.ends_at, allDay: e.all_day, link: e.html_link,
       }));
-    } catch (e) { gcalEvents = []; }
+      // Platform metadata layered on top (project/priority/status/assignees/notes).
+      const { data: meta } = await sb.from("gcal_event_meta").select("*").eq("user_id", uid);
+      gcalMeta = {};
+      (meta || []).forEach((m) => (gcalMeta[m.event_id] = m));
+      gcalEvents.forEach((e) => {
+        const m = gcalMeta[e.id];
+        if (m) { e.priority = m.priority || ""; e.projectId = m.project_id || ""; e.pstatus = m.status || ""; }
+      });
+    } catch (e) { gcalEvents = []; gcalMeta = {}; }
     if (view === "calendar") renderCalendar();
   }
   // Invoke the google-calendar function with the user's JWT attached explicitly
@@ -1680,17 +1710,19 @@
 
   // Anyone with an account (except pure requesters is optional) can be assigned.
   // Include all staff so the list is never mysteriously empty.
-  function fillAssigneeOptions(selectedIds) {
+  function fillAssigneeOptions(selectedIds, containerId) {
+    const container = $(containerId || "fAssignees");
+    if (!container) return;
     const chosen = new Set(selectedIds || []);
     const order = { owner: 0, delegate: 1, editor: 2, viewer: 3, requester: 4 };
     const assignable = people
       .filter((p) => p.userId)
       .sort((a, b) => (order[a.role] ?? 9) - (order[b.role] ?? 9) || (a.name || a.email || "").localeCompare(b.name || b.email || ""));
     if (!assignable.length) {
-      $("fAssignees").innerHTML = `<span class="check-empty">No people yet — invite staff under People &amp; roles first.</span>`;
+      container.innerHTML = `<span class="check-empty">No people yet — invite staff under People &amp; roles first.</span>`;
       return;
     }
-    $("fAssignees").innerHTML = assignable.map((p) => {
+    container.innerHTML = assignable.map((p) => {
       const name = p.name || p.email || "User";
       const tag = p.role === "owner" ? " · Admin" : p.role === "requester" ? "" : " · " + (ROLE_LABEL[p.role] || p.role);
       return `<label class="check-item"><input type="checkbox" value="${p.userId}" ${chosen.has(p.userId) ? "checked" : ""} /> <span>${esc(name)}<small class="check-tag">${esc(tag)}</small></span></label>`;
@@ -2241,9 +2273,11 @@
       // Admin can touch other Admins or grant the Admin role.
       const protectedRow = p.role === "owner" && !iAmOwner;
       const canEditRow = manage && !isMe && !protectedRow;
-      // Delegates can't hand out the Admin (owner) role.
+      // Delegates can't hand out the Admin (owner) role. The 'delegate' role is
+      // no longer assignable (use personal delegation instead) — but keep showing
+      // it for anyone who already holds it (e.g. the Managing Partner).
       const opts = ROLES
-        .filter((r) => r !== "owner" || iAmOwner)
+        .filter((r) => (r !== "owner" || iAmOwner) && (r !== "delegate" || p.role === "delegate"))
         .map((r) => `<option value="${r}" ${p.role === r ? "selected" : ""}>${ROLE_LABEL[r]}</option>`).join("");
       const label = p.name || p.email || "Unknown";
       // A member with no name hasn't completed their first sign-in yet.
