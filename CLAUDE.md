@@ -53,7 +53,10 @@ project context._
   unassigned personal task stays private to its creator (RLS, migration 028), so
   it never shows in another admin's All tasks. The personal/all **list views also
   surface the active desk's upcoming Google Calendar events** in a "Calendar
-  (Google)" group (`gcalListSection`, scopes todo/mine/all). **Office requests**
+  (Google)" group (`gcalListSection`, scopes todo/mine/all), and on the **board**
+  as cards grouped by their platform status; you can mark a Google event done from
+  the list or drag it between board columns (`setEventStatus` writes
+  `gcal_event_meta.status`; `evStatus`/`upcomingGcal`/`gcalCardMarkup`). **Office requests**
   is its own scope (`source === "request"`)
   so requests never mix into her personal tasks. `isForMe()` drives To do / My
   tasks; `isMine()` = assignee/recipient only. Adding a task warns (but still

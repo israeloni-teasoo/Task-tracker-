@@ -1070,35 +1070,72 @@
 
   function renderBoard() {
     const list = visibleTasks();
+    const events = ["todo", "mine", "all"].includes(scope) ? upcomingGcal() : [];
     boardView.innerHTML = STATUSES.map((s) => {
       const items = list.filter((t) => t.status === s.key);
-      const cards = items.length ? items.map(cardMarkup).join("") : `<div class="col-empty">No tasks</div>`;
+      const evs = events.filter((e) => evStatus(e) === s.key);
+      const total = items.length + evs.length;
+      const cards = total ? items.map(cardMarkup).join("") + evs.map(gcalCardMarkup).join("") : `<div class="col-empty">No tasks</div>`;
       return `
         <div class="column" data-status="${s.key}">
-          <div class="column-head"><span class="status-dot" style="background:${s.color}"></span>${s.label}<span class="col-count">${items.length}</span></div>
+          <div class="column-head"><span class="status-dot" style="background:${s.color}"></span>${s.label}<span class="col-count">${total}</span></div>
           <div class="column-body">${cards}</div>
         </div>`;
     }).join("");
     wireCards(); wireColumns();
   }
 
-  // Google Calendar items shown alongside tasks in the personal / all lists.
-  function gcalListSection() {
-    if (!["todo", "mine", "all"].includes(scope) || !gcalEvents.length) return "";
+  // Upcoming Google events (today onward) shown alongside tasks in the lists/board.
+  const evStatus = (e) => e.pstatus || "pending";
+  function upcomingGcal() {
     const now = startOfDay(new Date());
-    const upcoming = gcalEvents
+    return gcalEvents
       .filter((e) => { const d = new Date(e.start); return !isNaN(d) && d >= now; })
       .sort((a, b) => new Date(a.start) - new Date(b.start));
+  }
+  function gcalListSection() {
+    if (!["todo", "mine", "all"].includes(scope)) return "";
+    const upcoming = upcomingGcal();
     if (!upcoming.length) return "";
-    const rows = upcoming.map((e) => `
-      <div class="list-row gcal-row" data-gid="${esc(e.id)}">
+    const rows = upcoming.map((e) => {
+      const done = evStatus(e) === "completed";
+      return `
+      <div class="list-row gcal-row ${done ? "done" : ""}" data-gid="${esc(e.id)}">
+        <div class="list-check" data-gcheck="${esc(e.id)}" title="Toggle done">✓</div>
         <div class="list-main"><div class="list-title">📅 ${esc(e.summary || "(no title)")}</div></div>
         <div class="list-meta"><span class="chip gcal-chip-tag">Google</span><span class="chip due">${esc(formatDue(e.start))}</span></div>
-      </div>`).join("");
+      </div>`;
+    }).join("");
     return `<div class="list-group">
         <div class="list-group-head"><span class="status-dot" style="background:#4285f4"></span>Calendar (Google) <span class="col-count">· ${upcoming.length}</span></div>
         ${rows}
       </div>`;
+  }
+  // Card for a Google event on the board (draggable to change its platform status).
+  function gcalCardMarkup(e) {
+    const drag = can.edit() ? 'draggable="true"' : "";
+    const done = evStatus(e) === "completed";
+    return `<div class="card gcal-card ${done ? "done" : ""}" ${drag} data-gid="${esc(e.id)}">
+        <div class="card-title">📅 ${esc(e.summary || "(no title)")}</div>
+        <div class="card-meta"><span class="chip gcal-chip-tag">Google</span><span class="chip due">${esc(formatDue(e.start))}</span></div>
+      </div>`;
+  }
+  // Set a Google event's platform status (in gcal_event_meta) — optimistic.
+  async function setEventStatus(gid, status) {
+    const uid = effectiveUid();
+    const prev = gcalMeta[gid] || {};
+    const payload = {
+      user_id: uid, event_id: gid, status: status || null,
+      project_id: prev.project_id || null, priority: prev.priority || null,
+      assignees: prev.assignees || [], notes: prev.notes || null,
+      updated_by: me.id, updated_at: new Date().toISOString(),
+    };
+    gcalMeta[gid] = payload;
+    const ev = gcalEvents.find((x) => x.id === gid);
+    if (ev) ev.pstatus = status || "";
+    rerender();
+    try { await sb.from("gcal_event_meta").upsert(payload, { onConflict: "user_id,event_id" }); }
+    catch (e) { toast("Couldn't update event status"); }
   }
 
   function renderList() {
@@ -1130,7 +1167,14 @@
     }).join("") + gcalHtml;
     wireList();
     listView.querySelectorAll(".gcal-row").forEach((r) =>
-      r.addEventListener("click", () => openEventDetail(r.dataset.gid)));
+      r.addEventListener("click", (e) => { if (!e.target.closest("[data-gcheck]")) openEventDetail(r.dataset.gid); }));
+    listView.querySelectorAll("[data-gcheck]").forEach((chk) =>
+      chk.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (!can.edit()) { toast("You don't have edit access"); return; }
+        const gid = chk.dataset.gcheck, ev = gcalEvents.find((x) => x.id === gid);
+        setEventStatus(gid, ev && evStatus(ev) === "completed" ? "pending" : "completed");
+      }));
   }
 
   function emptyState() {
@@ -1584,12 +1628,22 @@
   //  Cards / list / drag & drop
   // ============================================================
   function wireCards() {
-    boardView.querySelectorAll(".card").forEach((card) => {
+    boardView.querySelectorAll(".card:not(.gcal-card)").forEach((card) => {
       card.addEventListener("click", () => openModal(card.dataset.id));
       if (!can.edit()) return;
       card.addEventListener("dragstart", (e) => {
         card.classList.add("dragging");
         e.dataTransfer.setData("text/plain", card.dataset.id);
+        e.dataTransfer.effectAllowed = "move";
+      });
+      card.addEventListener("dragend", () => card.classList.remove("dragging"));
+    });
+    boardView.querySelectorAll(".gcal-card").forEach((card) => {
+      card.addEventListener("click", () => openEventDetail(card.dataset.gid));
+      if (!can.edit()) return;
+      card.addEventListener("dragstart", (e) => {
+        card.classList.add("dragging");
+        e.dataTransfer.setData("text/plain", "gcal:" + card.dataset.gid);
         e.dataTransfer.effectAllowed = "move";
       });
       card.addEventListener("dragend", () => card.classList.remove("dragging"));
@@ -1603,10 +1657,18 @@
       col.addEventListener("dragleave", () => col.classList.remove("drag-over"));
       col.addEventListener("drop", async (e) => {
         e.preventDefault(); col.classList.remove("drag-over");
-        const id = e.dataTransfer.getData("text/plain");
-        const task = tasks.find((t) => t.id === id);
+        const raw = e.dataTransfer.getData("text/plain");
+        if (raw.startsWith("gcal:")) {
+          const gid = raw.slice(5), ev = gcalEvents.find((x) => x.id === gid);
+          if (ev && evStatus(ev) !== col.dataset.status) {
+            await setEventStatus(gid, col.dataset.status);
+            toast(`Moved to ${statusLabel(col.dataset.status)}`);
+          }
+          return;
+        }
+        const task = tasks.find((t) => t.id === raw);
         if (task && task.status !== col.dataset.status) {
-          await updateTask(id, { status: col.dataset.status });
+          await updateTask(raw, { status: col.dataset.status });
           toast(`Moved to ${statusLabel(col.dataset.status)}`);
         }
       });
@@ -2401,7 +2463,9 @@
     toast("Request submitted");
   });
 
-  function rerender() { if (["owner", "delegate"].includes(myRole)) render(); else renderDashboard(); }
+  // Full-app users (owner/delegate, or anyone who is someone's delegate) re-render
+  // the board/list; portal users refresh their dashboard.
+  function rerender() { if (["owner", "delegate"].includes(myRole) || myPrincipals.length) render(); else renderDashboard(); }
 
   let portalView = "assigned";
   function setPortalView(v) {
