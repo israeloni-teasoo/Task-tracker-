@@ -275,6 +275,11 @@ create or replace function public.is_recipient(p_task uuid, p_user uuid)
 returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.task_recipients where task_id = p_task and user_id = p_user);
 $$;
+-- Does a task have any assignee? (marks it as shared office work — migration 028)
+create or replace function public.has_assignees(p_task uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.task_assignees where task_id = p_task);
+$$;
 -- Anyone attached to a task: its requester, an assignee, or a recipient.
 create or replace function public.is_task_participant(p_task uuid, p_user uuid)
 returns boolean language sql stable security definer set search_path = public as $$
@@ -508,12 +513,16 @@ create policy projects_write on public.projects for all
 --   create-> staff create anything; a requester may only create their own request
 --   update-> staff (editor+) only  (requesters nudge via task_events instead)
 --   delete-> owner / delegate only
+-- Personal (unassigned, non-request) tasks are private to their creator; shared
+-- work (assigned tasks, requests) is office-wide for staff (migration 028).
 create policy tasks_select on public.tasks for select
   using (
-    public.is_staff()
+    created_by = auth.uid()
     or requester_id = auth.uid()
     or public.is_assignee(id, auth.uid())
     or public.is_recipient(id, auth.uid())
+    or public.is_delegate_for_task(id)
+    or (public.is_staff() and (source = 'request' or public.has_assignees(id)))
   );
 
 create policy tasks_insert_staff on public.tasks for insert

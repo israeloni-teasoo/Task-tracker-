@@ -501,6 +501,8 @@ body {
 .list-meta { display: flex; align-items: center; gap: 8px; flex: none; }
 
 .restore-btn { flex: none; font-size: 12.5px; padding: 6px 12px; }
+.list-row.gcal-row { border-left-color: #4285f4; cursor: pointer; }
+.chip.gcal-chip-tag { background: rgba(66,133,244,.12); color: #4285f4; font-weight: 600; }
 
 .empty-state {
   text-align: center; color: var(--c-text-faint); padding: 60px 20px;

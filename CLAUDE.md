@@ -49,7 +49,12 @@ project context._
   `effectiveUid()`). The default **To do**
   view is PERSONAL — only tasks assigned/directed to them or that they created for
   themselves (unassigned); the **All tasks** view is the office-wide list of
-  everyone's tasks; **Office requests** is its own scope (`source === "request"`)
+  **shared** tasks (assigned to someone, or requests) plus your own — a private
+  unassigned personal task stays private to its creator (RLS, migration 028), so
+  it never shows in another admin's All tasks. The personal/all **list views also
+  surface the active desk's upcoming Google Calendar events** in a "Calendar
+  (Google)" group (`gcalListSection`, scopes todo/mine/all). **Office requests**
+  is its own scope (`source === "request"`)
   so requests never mix into her personal tasks. `isForMe()` drives To do / My
   tasks; `isMine()` = assignee/recipient only. Adding a task warns (but still
   allows) when another open item is scheduled at the same time (`findConflicts`).
@@ -127,7 +132,10 @@ the schema but are unused/harmless.
     026 delegate visibility (task_assignees/task_recipients select + gcal read
     extended with delegation so a switched-in delegate actually sees the desk) ·
     027 gcal_event_meta (platform-only project/priority/status/assignees/notes on
-    a Google event, keyed by calendar owner + event id; same audience RLS).
+    a Google event, keyed by calendar owner + event id; same audience RLS) ·
+    028 private personal tasks (`tasks_select` rewritten with `has_assignees`:
+    an unassigned, non-request task is visible only to its creator + their
+    delegates; shared/assigned tasks and requests stay office-wide for staff).
 - Notification config lives in the RLS-locked `public.app_settings`
   (`push_fn_url`, `push_webhook_secret`) — never in the repo.
 

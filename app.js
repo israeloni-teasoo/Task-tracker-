@@ -1082,9 +1082,29 @@
     wireCards(); wireColumns();
   }
 
+  // Google Calendar items shown alongside tasks in the personal / all lists.
+  function gcalListSection() {
+    if (!["todo", "mine", "all"].includes(scope) || !gcalEvents.length) return "";
+    const now = startOfDay(new Date());
+    const upcoming = gcalEvents
+      .filter((e) => { const d = new Date(e.start); return !isNaN(d) && d >= now; })
+      .sort((a, b) => new Date(a.start) - new Date(b.start));
+    if (!upcoming.length) return "";
+    const rows = upcoming.map((e) => `
+      <div class="list-row gcal-row" data-gid="${esc(e.id)}">
+        <div class="list-main"><div class="list-title">📅 ${esc(e.summary || "(no title)")}</div></div>
+        <div class="list-meta"><span class="chip gcal-chip-tag">Google</span><span class="chip due">${esc(formatDue(e.start))}</span></div>
+      </div>`).join("");
+    return `<div class="list-group">
+        <div class="list-group-head"><span class="status-dot" style="background:#4285f4"></span>Calendar (Google) <span class="col-count">· ${upcoming.length}</span></div>
+        ${rows}
+      </div>`;
+  }
+
   function renderList() {
     const list = visibleTasks();
-    if (!list.length) { listView.innerHTML = emptyState(); return; }
+    const gcalHtml = gcalListSection();
+    if (!list.length && !gcalHtml) { listView.innerHTML = emptyState(); return; }
     listView.innerHTML = STATUSES.map((s) => {
       const items = list.filter((t) => t.status === s.key);
       if (!items.length) return "";
@@ -1107,8 +1127,10 @@
           <div class="list-group-head"><span class="status-dot" style="background:${s.color}"></span>${s.label} <span class="col-count">· ${items.length}</span></div>
           ${rows}
         </div>`;
-    }).join("");
+    }).join("") + gcalHtml;
     wireList();
+    listView.querySelectorAll(".gcal-row").forEach((r) =>
+      r.addEventListener("click", () => openEventDetail(r.dataset.gid)));
   }
 
   function emptyState() {
