@@ -501,6 +501,8 @@ body {
 .list-meta { display: flex; align-items: center; gap: 8px; flex: none; }
 
 .restore-btn { flex: none; font-size: 12.5px; padding: 6px 12px; }
+.list-group-head.date-head.overdue { color: var(--s-blocked); }
+.list-group-head.date-head.today { color: var(--c-accent); }
 .list-row.gcal-row { border-left-color: #4285f4; cursor: pointer; }
 .card.gcal-card { border-left: 3px solid #4285f4; }
 .chip.gcal-chip-tag { background: rgba(66,133,244,.12); color: #4285f4; font-weight: 600; }

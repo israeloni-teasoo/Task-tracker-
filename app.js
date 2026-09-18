@@ -1138,33 +1138,65 @@
     catch (e) { toast("Couldn't update event status"); }
   }
 
+  function taskRowMarkup(t) {
+    const ds = dueState(t.due);
+    const dueChip = t.due ? `<span class="chip due ${ds === "overdue" ? "overdue" : ds === "today" ? "today" : ""}">📅 ${formatDue(t.due)}</span>` : "";
+    return `
+      <div class="list-row prio-${t.priority} ${t.status === "completed" ? "done" : ""} ${t.needsAttention ? "flagged" : ""}" data-id="${t.id}">
+        <div class="list-check" data-check="${t.id}" title="Toggle complete">✓</div>
+        <div class="list-main">
+          <div class="list-title">${esc(t.title)}</div>
+          ${t.notes ? `<div class="list-sub">${esc(t.notes)}</div>` : ""}
+        </div>
+        <div class="list-meta">${attentionChip(t)}${commentBadge(t)}${assigneeChip(t)}${recipientChip(t)}${requestChip(t)}${projectChip(t)}<span class="chip prio ${t.priority}">${t.priority}</span>${dueChip}</div>
+        ${t.status === "completed" && can.edit() ? `<button class="ghost-btn restore-btn" data-restore="${t.id}" title="Bring this task back">↩ Restore</button>` : ""}
+      </div>`;
+  }
+  // Which date bucket a task falls in (for the To do / My tasks date grouping).
+  function dateBucket(due) {
+    if (!due) return { key: "none", label: "No date", order: 9e15 };
+    const d = new Date(due);
+    if (isNaN(d)) return { key: "none", label: "No date", order: 9e15 };
+    const day = startOfDay(d), today = startOfDay(new Date());
+    const diff = Math.round((day - today) / DAY_MS);
+    if (diff < 0) return { key: "overdue", label: "Overdue", order: -1 };
+    if (diff === 0) return { key: "today", label: "Today", order: 0 };
+    if (diff === 1) return { key: "tomorrow", label: "Tomorrow", order: 1 };
+    return { key: dayKey(d), label: d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }), order: day.getTime() };
+  }
+  function renderListByDate(list) {
+    const groups = {};
+    list.forEach((t) => {
+      const b = dateBucket(t.due);
+      (groups[b.key] = groups[b.key] || { label: b.label, order: b.order, items: [] }).items.push(t);
+    });
+    return Object.values(groups).sort((a, b) => a.order - b.order).map((g) => {
+      g.items.sort((a, b) => (new Date(a.due || 0)) - (new Date(b.due || 0)));
+      const cls = g.label === "Overdue" ? "overdue" : g.label === "Today" ? "today" : "";
+      return `<div class="list-group">
+          <div class="list-group-head date-head ${cls}">📅 ${esc(g.label)} <span class="col-count">· ${g.items.length}</span></div>
+          ${g.items.map(taskRowMarkup).join("")}
+        </div>`;
+    }).join("");
+  }
+  function renderListByStatus(list) {
+    return STATUSES.map((s) => {
+      const items = list.filter((t) => t.status === s.key);
+      if (!items.length) return "";
+      return `<div class="list-group">
+          <div class="list-group-head"><span class="status-dot" style="background:${s.color}"></span>${s.label} <span class="col-count">· ${items.length}</span></div>
+          ${items.map(taskRowMarkup).join("")}
+        </div>`;
+    }).join("");
+  }
+
   function renderList() {
     const list = visibleTasks();
     const gcalHtml = gcalListSection();
     if (!list.length && !gcalHtml) { listView.innerHTML = emptyState(); return; }
-    listView.innerHTML = STATUSES.map((s) => {
-      const items = list.filter((t) => t.status === s.key);
-      if (!items.length) return "";
-      const rows = items.map((t) => {
-        const ds = dueState(t.due);
-        const dueChip = t.due ? `<span class="chip due ${ds === "overdue" ? "overdue" : ds === "today" ? "today" : ""}">📅 ${formatDue(t.due)}</span>` : "";
-        return `
-          <div class="list-row prio-${t.priority} ${t.status === "completed" ? "done" : ""} ${t.needsAttention ? "flagged" : ""}" data-id="${t.id}">
-            <div class="list-check" data-check="${t.id}" title="Toggle complete">✓</div>
-            <div class="list-main">
-              <div class="list-title">${esc(t.title)}</div>
-              ${t.notes ? `<div class="list-sub">${esc(t.notes)}</div>` : ""}
-            </div>
-            <div class="list-meta">${attentionChip(t)}${commentBadge(t)}${assigneeChip(t)}${recipientChip(t)}${requestChip(t)}${projectChip(t)}<span class="chip prio ${t.priority}">${t.priority}</span>${dueChip}</div>
-            ${t.status === "completed" && can.edit() ? `<button class="ghost-btn restore-btn" data-restore="${t.id}" title="Bring this task back">↩ Restore</button>` : ""}
-          </div>`;
-      }).join("");
-      return `
-        <div class="list-group">
-          <div class="list-group-head"><span class="status-dot" style="background:${s.color}"></span>${s.label} <span class="col-count">· ${items.length}</span></div>
-          ${rows}
-        </div>`;
-    }).join("") + gcalHtml;
+    // To do / My tasks group by due date; other scopes keep status columns.
+    const byDate = ["todo", "mine"].includes(scope);
+    listView.innerHTML = (byDate ? renderListByDate(list) : renderListByStatus(list)) + gcalHtml;
     wireList();
     listView.querySelectorAll(".gcal-row").forEach((r) =>
       r.addEventListener("click", (e) => { if (!e.target.closest("[data-gcheck]")) openEventDetail(r.dataset.gid); }));

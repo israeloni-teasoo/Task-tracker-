@@ -59,7 +59,10 @@ project context._
   `gcal_event_meta.status`; `evStatus`/`upcomingGcal`/`gcalCardMarkup`). **Office requests**
   is its own scope (`source === "request"`)
   so requests never mix into her personal tasks. `isForMe()` drives To do / My
-  tasks; `isMine()` = assignee/recipient only. Adding a task warns (but still
+  tasks; `isMine()` = assignee/recipient only. In the **list view, To do / My
+  tasks group by due date** (Overdue · Today · Tomorrow · each later date · No
+  date — `renderListByDate`/`dateBucket`); other scopes keep status columns
+  (`renderListByStatus`). Adding a task warns (but still
   allows) when another open item is scheduled at the same time (`findConflicts`).
   **Personal delegation (PA feature, migration 025):** any user can name
   delegate(s) in **Settings → My delegates** (`delegations` table). A delegate
