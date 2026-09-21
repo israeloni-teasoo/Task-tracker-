@@ -1720,18 +1720,22 @@
     try {
       const { data, error } = await invokeFn("parse-tasks", { text });
       if (error) {
-        let msg = error.message || "";
-        try { const b = await error.context.json(); if (b && b.message) msg = b.message; } catch (_) {}
-        throw new Error(msg || "Extraction failed");
+        let msg = error.message || "", code = "";
+        // Read the function's JSON body so we branch on its error CODE, not a
+        // fuzzy text match (a model error mentioning "gemini" must not be
+        // mistaken for a missing key).
+        try { const b = await error.context.json(); if (b) { if (b.message) msg = b.message; if (b.error) code = b.error; } } catch (_) {}
+        const err = new Error(msg || "Extraction failed"); err.code = code; throw err;
       }
       pasteSuggestions = (data && data.tasks) || [];
       if (!pasteSuggestions.length) { toast("No tasks found in that text"); return; }
       renderPasteRows();
       hide($("pasteStep1")); show($("pasteStep2"));
     } catch (e) {
+      const code = (e && e.code) || "";
       const m = (e && e.message) || "";
-      toast(/not_configured|GEMINI|API_KEY/i.test(m) ? "Set the GEMINI_API_KEY secret on the parse-tasks function first."
-        : /not_?deployed|not found|Failed to send/i.test(m) ? "Deploy the parse-tasks function first (Actions → Deploy Edge Function)."
+      toast(code === "not_configured" ? "Set the GEMINI_API_KEY secret on the parse-tasks function first."
+        : (!code && /Failed to send|not found|not_?deployed/i.test(m)) ? "Deploy the parse-tasks function first (Actions → Deploy Edge Function)."
         : "Couldn't extract tasks: " + (m || "try again"));
     } finally { btn.disabled = false; btn.textContent = label; }
   }
