@@ -13,9 +13,13 @@ on:
   workflow_dispatch:
     inputs:
       function:
-        description: "Function name (folder under backend/functions/)"
+        description: "Function name to deploy — google-calendar | parse-tasks | send-push (type it; no default so you don't deploy the wrong one)"
         required: true
-        default: "google-calendar"
+        type: choice
+        options:
+          - parse-tasks
+          - google-calendar
+          - send-push
       project_ref:
         description: "Supabase project ref"
         required: true
