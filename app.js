@@ -1657,6 +1657,91 @@
   }
 
   // ============================================================
+  //  Paste to tasks (AI extraction via parse-tasks function)
+  // ============================================================
+  // Invoke a Supabase Edge Function with the user's JWT attached.
+  async function invokeFn(name, body) {
+    let headers;
+    try {
+      const { data: { session } } = await sb.auth.getSession();
+      if (session && session.access_token) headers = { Authorization: `Bearer ${session.access_token}` };
+    } catch (_) {}
+    return sb.functions.invoke(name, headers ? { body, headers } : { body });
+  }
+  let pasteSuggestions = [];
+  function openPaste() {
+    pasteSuggestions = [];
+    $("pasteText").value = "";
+    show($("pasteStep1")); hide($("pasteStep2"));
+    show($("pasteOverlay"));
+    setTimeout(() => $("pasteText").focus(), 30);
+  }
+  const closePaste = () => hide($("pasteOverlay"));
+  async function extractTasks() {
+    const text = $("pasteText").value.trim();
+    if (!text) { toast("Paste some text first"); return; }
+    const btn = $("pasteExtract"); const label = btn.textContent;
+    btn.disabled = true; btn.textContent = "Reading…";
+    try {
+      const { data, error } = await invokeFn("parse-tasks", { text });
+      if (error) {
+        let msg = error.message || "";
+        try { const b = await error.context.json(); if (b && b.message) msg = b.message; } catch (_) {}
+        throw new Error(msg || "Extraction failed");
+      }
+      pasteSuggestions = (data && data.tasks) || [];
+      if (!pasteSuggestions.length) { toast("No tasks found in that text"); return; }
+      renderPasteRows();
+      hide($("pasteStep1")); show($("pasteStep2"));
+    } catch (e) {
+      const m = (e && e.message) || "";
+      toast(/not_configured|ANTHROPIC/i.test(m) ? "Set the ANTHROPIC_API_KEY secret on the parse-tasks function first."
+        : /not_?deployed|not found|Failed to send/i.test(m) ? "Deploy the parse-tasks function first (Actions → Deploy Edge Function)."
+        : "Couldn't extract tasks: " + (m || "try again"));
+    } finally { btn.disabled = false; btn.textContent = label; }
+  }
+  function renderPasteRows() {
+    $("pasteCount").textContent = `${pasteSuggestions.length} suggested — untick any you don't want, edit as needed, then add.`;
+    $("pasteList").innerHTML = pasteSuggestions.map((t, i) => `
+      <div class="paste-row" data-i="${i}">
+        <input type="checkbox" class="paste-inc" checked aria-label="Include" />
+        <div class="paste-fields">
+          <input type="text" class="paste-title" value="${esc(t.title)}" placeholder="Task title" />
+          <div class="paste-sub">
+            <input type="datetime-local" class="paste-due" value="${t.due ? toInputDateTime(t.due) : ""}" />
+            <select class="paste-prio">
+              <option value="low" ${t.priority === "low" ? "selected" : ""}>Low</option>
+              <option value="medium" ${t.priority === "medium" || !t.priority ? "selected" : ""}>Medium</option>
+              <option value="high" ${t.priority === "high" ? "selected" : ""}>High</option>
+            </select>
+          </div>
+        </div>
+      </div>`).join("");
+  }
+  async function savePasteTasks() {
+    const rows = Array.from($("pasteList").querySelectorAll(".paste-row"));
+    const chosen = rows.filter((r) => r.querySelector(".paste-inc").checked).map((r, _i) => ({
+      title: r.querySelector(".paste-title").value.trim(),
+      due: fromInputDateTime(r.querySelector(".paste-due").value),
+      priority: r.querySelector(".paste-prio").value,
+      notes: pasteSuggestions[+r.dataset.i] ? pasteSuggestions[+r.dataset.i].notes : "",
+    })).filter((t) => t.title);
+    if (!chosen.length) { toast("Nothing selected"); return; }
+    const btn = $("pasteSave"); const label = btn.textContent;
+    btn.disabled = true; btn.textContent = "Adding…";
+    const proj = (defaultProject() || {}).id;
+    let n = 0;
+    for (const t of chosen) {
+      const id = await createTask({ title: t.title, notes: t.notes || "", projectId: proj, priority: t.priority || "medium", status: "pending", due: t.due });
+      if (id) n++;
+    }
+    btn.disabled = false; btn.textContent = label;
+    closePaste();
+    render();
+    toast(`Added ${n} task${n === 1 ? "" : "s"}`);
+  }
+
+  // ============================================================
   //  Cards / list / drag & drop
   // ============================================================
   function wireCards() {
@@ -1708,8 +1793,29 @@
   }
 
   function wireList() {
-    listView.querySelectorAll(".list-row").forEach((row) => {
-      row.addEventListener("click", (e) => { if (!e.target.closest("[data-check]")) openModal(row.dataset.id); });
+    listView.querySelectorAll(".list-row:not(.gcal-row)").forEach((row) => {
+      row.addEventListener("click", (e) => {
+        if (row._swiped) { row._swiped = false; return; }   // ignore the tap that ends a swipe
+        if (!e.target.closest("[data-check]")) openModal(row.dataset.id);
+      });
+      // Swipe left/right on a task row (mobile) to toggle done.
+      let sx = 0, sy = 0, dx = 0, swiping = false;
+      row.addEventListener("touchstart", (e) => { const t = e.touches[0]; sx = t.clientX; sy = t.clientY; dx = 0; swiping = false; }, { passive: true });
+      row.addEventListener("touchmove", (e) => {
+        const t = e.touches[0]; dx = t.clientX - sx; const dy = t.clientY - sy;
+        if (!swiping && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) swiping = true;
+        if (swiping) { row.style.transition = "none"; row.style.transform = `translateX(${dx}px)`; row.classList.toggle("swipe-armed", Math.abs(dx) > 80); }
+      }, { passive: true });
+      row.addEventListener("touchend", async () => {
+        row.style.transition = ""; row.style.transform = ""; row.classList.remove("swipe-armed");
+        if (swiping && Math.abs(dx) > 80) {
+          row._swiped = true;
+          if (!can.edit()) { toast("You don't have edit access"); return; }
+          const task = tasks.find((t) => t.id === row.dataset.id);
+          if (task) await updateTask(task.id, { status: task.status === "completed" ? "pending" : "completed" });
+        }
+        swiping = false;
+      });
     });
     listView.querySelectorAll("[data-check]").forEach((chk) => {
       chk.addEventListener("click", async (e) => {
@@ -1765,6 +1871,24 @@
       return;
     }
     assigneesByTask[taskId] = ids.slice();
+  }
+  // Persist the "copied to" (recipient) set for a task — they see it as a task
+  // to attend to (isMine counts recipients). Diff insert/delete.
+  async function setTaskRecipients(taskId, ids) {
+    const cur = recipientsByTask[taskId] || [];
+    const toAdd = ids.filter((x) => !cur.includes(x));
+    const toDel = cur.filter((x) => !ids.includes(x));
+    try {
+      if (toAdd.length) {
+        const { error } = await sb.from("task_recipients").insert(toAdd.map((u) => ({ task_id: taskId, user_id: u })));
+        if (error) throw error;
+      }
+      if (toDel.length) {
+        const { error } = await sb.from("task_recipients").delete().eq("task_id", taskId).in("user_id", toDel);
+        if (error) throw error;
+      }
+    } catch (e) { console.warn("cc save failed", e); toast("Couldn't save the copied people"); return; }
+    recipientsByTask[taskId] = ids.slice();
   }
   async function updateTask(id, patch) {
     const task = tasks.find((t) => t.id === id);
@@ -1858,6 +1982,7 @@
     fillProjectOptions(t ? t.projectId : scoped);
     // Managing someone's desk? A new task defaults to being assigned to them.
     fillAssigneeOptions(t ? (assigneesByTask[t.id] || []) : (actingFor ? [actingFor] : []));
+    fillAssigneeOptions(t ? (recipientsByTask[t.id] || []) : [], "fCc");   // "Copy to"
     $("fPriority").value = t ? t.priority : "medium";
     $("fStatus").value = t ? t.status : "pending";
     // New task from a calendar day: prefill the date (9:00 AM), time editable.
@@ -1892,15 +2017,17 @@
       }
     }
     const assignees = Array.from(document.querySelectorAll('#fAssignees input:checked')).map((c) => c.value);
+    const cc = Array.from(document.querySelectorAll('#fCc input:checked')).map((c) => c.value);
     closeModal();
     if (id) {
       await updateTask(id, data);
       await setTaskAssignees(id, assignees);
+      await setTaskRecipients(id, cc);
       render();
       toast("Task updated");
     } else {
       const newId = await createTask(data);
-      if (newId) { await setTaskAssignees(newId, assignees); render(); }
+      if (newId) { await setTaskAssignees(newId, assignees); await setTaskRecipients(newId, cc); render(); }
       toast("Task added");
     }
   });
@@ -1916,6 +2043,14 @@
   $("newTaskBtn").addEventListener("click", () => openModal(null));
   $("closeModal").addEventListener("click", closeModal);
   $("cancelTask").addEventListener("click", closeModal);
+  // Paste-to-tasks (AI extraction)
+  $("pasteBtn") && $("pasteBtn").addEventListener("click", openPaste);
+  $("mPasteBtn") && $("mPasteBtn").addEventListener("click", () => { if (typeof closeSheet === "function") closeSheet(); openPaste(); });
+  $("pasteClose") && $("pasteClose").addEventListener("click", closePaste);
+  $("pasteExtract") && $("pasteExtract").addEventListener("click", extractTasks);
+  $("pasteBack") && $("pasteBack").addEventListener("click", () => { show($("pasteStep1")); hide($("pasteStep2")); });
+  $("pasteSave") && $("pasteSave").addEventListener("click", savePasteTasks);
+  $("pasteOverlay") && $("pasteOverlay").addEventListener("click", (e) => { if (e.target === $("pasteOverlay")) closePaste(); });
   overlay.addEventListener("click", (e) => { if (e.target === overlay) closeModal(); });
 
   // ============================================================

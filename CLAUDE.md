@@ -96,8 +96,12 @@ project context._
 ## Key features
 - Tasks: title, notes, project, priority, status (pending/inprogress/blocked/
   onhold/completed), **due date+time** (`due` is `timestamptz`), **multiple
-  assignees** (`task_assignees`), attachments, comment/activity thread
-  (`task_events`).
+  assignees** (`task_assignees`), **"Copy to" (CC)** people via `task_recipients`
+  (`setTaskRecipients`, `#fCc`) — copied people see it as a task to attend to
+  (isMine counts recipients), attachments, comment/activity thread
+  (`task_events`). **✨ From text** extracts tasks from pasted notes via the
+  `parse-tasks` Edge Function (review-then-save). On mobile you can **swipe a task
+  row** left/right to toggle done.
 - Requests: staff submit requests and pick **recipients** ("who is this for?",
   `task_recipients`, via `public_staff()` / `public_set_recipients`), optionally
   the Admin. Requesters can send reminders (30-min server-side cooldown in
@@ -151,6 +155,14 @@ the schema but are unused/harmless.
   (`RESEND_API_KEY`, `EMAIL_FROM`). Called only by DB triggers holding
   `WEBHOOK_SECRET`. Secrets: VAPID_*, WEBHOOK_SECRET, RESEND_API_KEY.
 - `invite-user` — legacy service-role inviter, no longer called by the app.
+- **`parse-tasks`** — AI extraction: takes pasted text, calls the Anthropic
+  Messages API (raw HTTPS, server-side) and returns `{title,notes,due,priority}`
+  suggestions; extract-only, never writes. Verifies the caller's JWT. Deploy
+  `--no-verify-jwt`. Secrets: `ANTHROPIC_API_KEY`, optional `ANTHROPIC_MODEL`
+  (default `claude-opus-5`; `claude-haiku-4-5` recommended for cost). Frontend:
+  **✨ From text** button (topbar / mobile More sheet) → `#pasteOverlay` two-step
+  review (`extractTasks`/`renderPasteRows`/`savePasteTasks`, `invokeFn`). Setup:
+  `docs/PASTE-TO-TASKS.md`.
 - **Deploying functions:** the **Deploy Edge Function** GitHub Action
   (`.github/workflows/deploy-function.yml`, manual) stages a function from
   `backend/functions/` into `supabase/functions/` and runs

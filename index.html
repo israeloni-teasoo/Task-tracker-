@@ -243,6 +243,7 @@
           </div>
           <button class="icon-btn filter-top" id="mFilterBtn" title="Filters" aria-label="Filters">⚙<span class="flt-badge" id="mFilterBadge" hidden>0</span></button>
           <button class="icon-btn theme-top js-theme-toggle" title="Toggle light/dark" aria-label="Toggle light/dark">🌙</button>
+          <button class="ghost-btn paste-btn" id="pasteBtn" title="Turn pasted text into tasks">✨ From text</button>
           <button class="primary-btn" id="newTaskBtn">＋ New task</button>
         </div>
       </header>
@@ -374,6 +375,10 @@
         <div class="field">
           <span>Assign to</span>
           <div id="fAssignees" class="check-group"><!-- staff checkboxes rendered by JS --></div>
+        </div>
+        <div class="field">
+          <span>Copy to <small class="field-help-inline">(they'll also see it as a task to attend to)</small></span>
+          <div id="fCc" class="check-group"><!-- staff checkboxes rendered by JS --></div>
         </div>
         <div class="modal-foot">
           <button type="button" class="danger-btn" id="deleteTask" hidden>Delete</button>
@@ -523,6 +528,35 @@
     </div>
   </div>
 
+  <!-- ===== Paste to tasks (AI extraction) ===== -->
+  <div class="modal-overlay" id="pasteOverlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pasteTitle">
+      <div class="modal-head">
+        <h3 id="pasteTitle">✨ Paste to tasks</h3>
+        <button class="icon-btn" id="pasteClose" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="pasteStep1">
+          <p class="field-help">Paste notes, action items or a meeting summary — the app suggests tasks for you to review before saving.</p>
+          <textarea id="pasteText" rows="8" placeholder="e.g. Follow up with Legal on the NDA by Friday. Book the boardroom for Tuesday 2pm. Send Q3 numbers to the MP — urgent."></textarea>
+          <div class="modal-foot">
+            <span class="spacer"></span>
+            <button type="button" class="primary-btn" id="pasteExtract">Extract tasks</button>
+          </div>
+        </div>
+        <div id="pasteStep2" hidden>
+          <p class="field-help" id="pasteCount"></p>
+          <div id="pasteList" class="paste-list"></div>
+          <div class="modal-foot">
+            <button type="button" class="ghost-btn" id="pasteBack">← Back</button>
+            <span class="spacer"></span>
+            <button type="button" class="primary-btn" id="pasteSave">Add tasks</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ===== Google event detail / edit (modal on desktop, drawer on mobile) ===== -->
   <div class="modal-overlay sheet-capable" id="eventOverlay" hidden>
     <div class="modal event-modal" role="dialog" aria-modal="true" aria-labelledby="evTitle">
@@ -654,6 +688,7 @@
       </div>
 
       <div class="sheet-actions">
+        <button class="ghost-btn" id="mPasteBtn">✨ From text</button>
         <button class="ghost-btn" data-msheet-scope="overdue">🗓️ Overdue</button>
         <button class="ghost-btn" data-msheet-scope="completed">✅ Completed log</button>
         <button class="ghost-btn" id="mPeopleBtn" hidden>👥 People &amp; roles</button>
