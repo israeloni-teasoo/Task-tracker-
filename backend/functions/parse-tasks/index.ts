@@ -12,11 +12,11 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-// build: v3 (force fresh isolate; adds temporary {action:"diag"} probe)
+// build: v4 (default model -> gemini-3.6-flash; diag accepts a model override)
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
-const MODEL = Deno.env.get("GEMINI_MODEL") || "gemini-2.0-flash";
+const MODEL = Deno.env.get("GEMINI_MODEL") || "gemini-3.6-flash";
 
 const admin = createClient(SUPABASE_URL, SERVICE_KEY);
 
@@ -53,10 +53,11 @@ Deno.serve(async (req) => {
   // with the configured key+model actually succeeds. Never returns the key
   // value itself. Remove once paste-to-tasks is confirmed working.
   if (bodyIn && bodyIn.action === "diag") {
+    const testModel = (typeof bodyIn.model === "string" && bodyIn.model) || MODEL;
     let gemini = "skipped (no key)";
     if (GEMINI_API_KEY) {
       try {
-        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
+        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${testModel}:generateContent`, {
           method: "POST",
           headers: { "x-goog-api-key": GEMINI_API_KEY, "content-type": "application/json" },
           body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "Reply with the word ok." }] }] }),
@@ -67,7 +68,7 @@ Deno.serve(async (req) => {
           : `error ${r.status}: ${d?.error?.message || "unknown"}`;
       } catch (e) { gemini = "fetch_failed: " + String((e as Error)?.message || e); }
     }
-    return json({ hasKey: !!GEMINI_API_KEY, model: MODEL, gemini });
+    return json({ hasKey: !!GEMINI_API_KEY, model: testModel, gemini });
   }
 
   if (!GEMINI_API_KEY) return json({ error: "not_configured", message: "Set the GEMINI_API_KEY secret on this function." }, 400);
