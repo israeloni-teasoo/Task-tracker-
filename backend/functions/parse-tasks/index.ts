@@ -12,7 +12,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-// build: v2 (force fresh isolate so a newly-set GEMINI_API_KEY is picked up)
+// build: v3 (force fresh isolate; adds temporary {action:"diag"} probe)
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
@@ -45,11 +45,36 @@ Rules:
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+
+  const bodyIn = await req.json().catch(() => ({} as any));
+
+  // TEMP diagnostics (unauthenticated): confirms, server-side, whether THIS
+  // isolate can see the GEMINI_API_KEY secret and whether a live Gemini call
+  // with the configured key+model actually succeeds. Never returns the key
+  // value itself. Remove once paste-to-tasks is confirmed working.
+  if (bodyIn && bodyIn.action === "diag") {
+    let gemini = "skipped (no key)";
+    if (GEMINI_API_KEY) {
+      try {
+        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
+          method: "POST",
+          headers: { "x-goog-api-key": GEMINI_API_KEY, "content-type": "application/json" },
+          body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "Reply with the word ok." }] }] }),
+        });
+        const d = await r.json().catch(() => ({}));
+        gemini = r.ok
+          ? "ok: " + ((d.candidates?.[0]?.content?.parts || []).map((p: any) => p.text || "").join("").trim() || "(empty)")
+          : `error ${r.status}: ${d?.error?.message || "unknown"}`;
+      } catch (e) { gemini = "fetch_failed: " + String((e as Error)?.message || e); }
+    }
+    return json({ hasKey: !!GEMINI_API_KEY, model: MODEL, gemini });
+  }
+
   if (!GEMINI_API_KEY) return json({ error: "not_configured", message: "Set the GEMINI_API_KEY secret on this function." }, 400);
   const uid = await userId(req);
   if (!uid) return json({ error: "unauthorized" }, 401);
 
-  const { text } = await req.json().catch(() => ({}));
+  const { text } = bodyIn;
   if (!text || typeof text !== "string" || !text.trim()) return json({ error: "no_text" }, 400);
   if (text.length > 20000) return json({ error: "too_long", message: "Paste up to ~20,000 characters at a time." }, 400);
 
