@@ -979,7 +979,7 @@
   }
 
   function updateCounts() {
-    let today = 0, overdue = 0, attention = 0, completed = 0, mine = 0, todo = 0, requests = 0;
+    let today = 0, overdue = 0, attention = 0, completed = 0, mine = 0, todo = 0, requests = 0, myOverdue = 0;
     tasks.forEach((t) => {
       const ds = dueState(t.due);
       if (ds === "today") today++; if (ds === "overdue") overdue++;
@@ -989,7 +989,10 @@
       if (t.status !== "completed" && personal) todo++;
       if (t.status === "completed") completed++;
       if (personal) mine++;
+      if (personal && t.status !== "completed" && ds === "overdue") myOverdue++;
     });
+    // Overdue count in the tab title, so it nags even when the app isn't focused.
+    try { document.title = (myOverdue ? `(${myOverdue}) ` : "") + "TaskTrack"; } catch (_) {}
     setCount("all", tasks.length); setCount("today", today); setCount("mine", mine); setCount("todo", todo);
     setCount("requests", requests);
     setCount("overdue", overdue); setCount("attention", attention); setCount("completed", completed);
@@ -1190,13 +1193,18 @@
     }).join("");
   }
 
+  function quickAddMarkup() {
+    if (!can.edit() || !["todo", "mine", "all"].includes(scope)) return "";
+    return `<div class="quick-add"><span class="qa-plus">＋</span><input type="text" id="quickAddInput" placeholder="Add a task and press Enter…" autocomplete="off" /></div>`;
+  }
   function renderList() {
     const list = visibleTasks();
     const gcalHtml = gcalListSection();
-    if (!list.length && !gcalHtml) { listView.innerHTML = emptyState(); return; }
+    const qa = quickAddMarkup();
+    if (!list.length && !gcalHtml) { listView.innerHTML = qa + emptyState(); wireQuickAdd(); return; }
     // To do / My tasks group by due date; other scopes keep status columns.
     const byDate = ["todo", "mine"].includes(scope);
-    listView.innerHTML = (byDate ? renderListByDate(list) : renderListByStatus(list)) + gcalHtml;
+    listView.innerHTML = qa + (byDate ? renderListByDate(list) : renderListByStatus(list)) + gcalHtml;
     wireList();
     listView.querySelectorAll(".gcal-row").forEach((r) =>
       r.addEventListener("click", (e) => { if (!e.target.closest("[data-gcheck]")) openEventDetail(r.dataset.gid); }));
@@ -1207,10 +1215,37 @@
         const gid = chk.dataset.gcheck, ev = gcalEvents.find((x) => x.id === gid);
         setEventStatus(gid, ev && evStatus(ev) === "completed" ? "pending" : "completed");
       }));
+    wireQuickAdd();
+  }
+  function wireQuickAdd() {
+    const qi = $("quickAddInput");
+    if (!qi) return;
+    qi.addEventListener("keydown", async (e) => {
+      if (e.key !== "Enter") return;
+      const title = qi.value.trim();
+      if (!title) return;
+      qi.value = "";
+      const id = await createTask({ title, notes: "", projectId: (defaultProject() || {}).id, priority: "medium", status: "pending", due: null });
+      if (id && actingFor) await setTaskAssignees(id, [actingFor]);   // when managing a desk, it's theirs
+      // createTask re-renders; restore focus to the fresh input for rapid entry.
+      setTimeout(() => { const n = $("quickAddInput"); if (n) n.focus(); }, 0);
+    });
   }
 
   function emptyState() {
-    return `<div class="empty-state"><div class="big">🗒️</div><p>${query ? "No tasks match your search." : (can.edit() ? "No tasks here yet. Hit <strong>＋ New task</strong> to add one." : "Nothing to show yet.")}</p></div>`;
+    if (query) return `<div class="empty-state"><div class="big">🔍</div><p>No tasks match your search.</p></div>`;
+    const map = {
+      todo: ["🎉", "You're all caught up — nothing on your plate."],
+      mine: ["🎉", "No tasks assigned to you right now."],
+      all: ["🗒️", can.edit() ? "No office tasks yet. Hit <strong>＋ New task</strong> or <strong>✨ From text</strong>." : "No tasks yet."],
+      requests: ["📨", "No office requests."],
+      completed: ["✅", "Nothing completed yet."],
+      today: ["📅", "Nothing due today."],
+      overdue: ["👍", "Nothing overdue — nice."],
+      attention: ["✅", "Nothing needs your attention."],
+    };
+    const [icon, msg] = map[scope] || ["🗒️", can.edit() ? "No tasks here yet. Hit <strong>＋ New task</strong> to add one." : "Nothing to show yet."];
+    return `<div class="empty-state"><div class="big">${icon}</div><p>${msg}</p></div>`;
   }
 
   // ============================================================
@@ -1695,7 +1730,7 @@
       hide($("pasteStep1")); show($("pasteStep2"));
     } catch (e) {
       const m = (e && e.message) || "";
-      toast(/not_configured|ANTHROPIC/i.test(m) ? "Set the ANTHROPIC_API_KEY secret on the parse-tasks function first."
+      toast(/not_configured|GEMINI|API_KEY/i.test(m) ? "Set the GEMINI_API_KEY secret on the parse-tasks function first."
         : /not_?deployed|not found|Failed to send/i.test(m) ? "Deploy the parse-tasks function first (Actions → Deploy Edge Function)."
         : "Couldn't extract tasks: " + (m || "try again"));
     } finally { btn.disabled = false; btn.textContent = label; }
@@ -1812,7 +1847,11 @@
           row._swiped = true;
           if (!can.edit()) { toast("You don't have edit access"); return; }
           const task = tasks.find((t) => t.id === row.dataset.id);
-          if (task) await updateTask(task.id, { status: task.status === "completed" ? "pending" : "completed" });
+          if (task) {
+            const prev = task.status, done = prev !== "completed";
+            await updateTask(task.id, { status: done ? "completed" : "pending" });
+            toast(done ? "Marked done" : "Marked not done", { label: "Undo", fn: () => updateTask(task.id, { status: prev }) });
+          }
         }
         swiping = false;
       });
@@ -1823,7 +1862,9 @@
         if (!can.edit()) { toast("You don't have edit access"); return; }
         const task = tasks.find((t) => t.id === chk.dataset.check);
         if (!task) return;
-        await updateTask(task.id, { status: task.status === "completed" ? "pending" : "completed" });
+        const prev = task.status, done = prev !== "completed";
+        await updateTask(task.id, { status: done ? "completed" : "pending" });
+        toast(done ? "Marked done" : "Marked not done", { label: "Undo", fn: () => updateTask(task.id, { status: prev }) });
       });
     });
     listView.querySelectorAll("[data-restore]").forEach((btn) => {
@@ -2035,9 +2076,15 @@
   deleteBtn.addEventListener("click", async () => {
     const id = $("taskId").value;
     if (!id) return;
+    const t = tasks.find((x) => x.id === id);
+    const snap = t ? { title: t.title, notes: t.notes, projectId: t.projectId, priority: t.priority,
+      status: t.status, due: t.due, assignees: (assigneesByTask[id] || []).slice(), cc: (recipientsByTask[id] || []).slice() } : null;
     closeModal();
     await deleteTask(id);
-    toast("Task deleted");
+    toast("Task deleted", snap ? { label: "Undo", fn: async () => {
+      const nid = await createTask({ title: snap.title, notes: snap.notes, projectId: snap.projectId, priority: snap.priority, status: snap.status, due: snap.due });
+      if (nid) { await setTaskAssignees(nid, snap.assignees); await setTaskRecipients(nid, snap.cc); render(); }
+    } } : undefined);
   });
 
   $("newTaskBtn").addEventListener("click", () => openModal(null));
@@ -2205,6 +2252,16 @@
     if (e.key !== "Escape") return;
     if (!projectOverlay.hidden) closeProjectModal();
     else if (!overlay.hidden) closeModal();
+  });
+  // Shortcuts: N = new task, / = focus search (ignored while typing or in a modal).
+  document.addEventListener("keydown", (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const el = e.target, tag = (el.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select" || el.isContentEditable) return;
+    const modals = [overlay, projectOverlay, $("settingsOverlay"), $("pasteOverlay"), $("eventOverlay"), $("detailOverlay"), $("peopleOverlay")];
+    if (modals.some((m) => m && !m.hidden)) return;
+    if ((e.key === "n" || e.key === "N") && can.edit()) { e.preventDefault(); openModal(null); }
+    else if (e.key === "/" && searchInput) { e.preventDefault(); searchInput.focus(); }
   });
 
   // ============================================================
@@ -2985,10 +3042,21 @@
   function col(c) { return /^#[0-9a-fA-F]{3,8}$/.test(c || "") ? c : "#94a3b8"; }
 
   let toastTimer;
-  function toast(msg) {
-    toastEl.textContent = msg; toastEl.hidden = false;
+  // toast("done") or toast("Marked done", { label: "Undo", fn: () => ... })
+  function toast(msg, action) {
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => (toastEl.hidden = true), 2400);
+    if (action && action.label && typeof action.fn === "function") {
+      toastEl.innerHTML = `<span class="toast-msg"></span><button type="button" class="toast-action"></button>`;
+      toastEl.querySelector(".toast-msg").textContent = msg;
+      const btn = toastEl.querySelector(".toast-action");
+      btn.textContent = action.label;
+      btn.addEventListener("click", () => { toastEl.hidden = true; action.fn(); });
+      toastEl.hidden = false;
+      toastTimer = setTimeout(() => (toastEl.hidden = true), 6000);
+    } else {
+      toastEl.textContent = msg; toastEl.hidden = false;
+      toastTimer = setTimeout(() => (toastEl.hidden = true), 2400);
+    }
   }
 
   // ---- Surface uncaught errors instead of failing silently ----

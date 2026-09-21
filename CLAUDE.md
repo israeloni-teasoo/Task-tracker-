@@ -112,6 +112,10 @@ project context._
   migration 014). Device notifications default on for all staff.
 - Live sync (Realtime), light/dark theme, offline cache, backup export/import
   (in Settings).
+- **UX niceties:** inline **quick-add** row atop To do/My tasks/All tasks
+  (`quickAddMarkup`/`wireQuickAdd`); **Undo** action toasts (`toast(msg,{label,fn})`)
+  after mark-done / delete; **keyboard** `N` = new task, `/` = focus search;
+  per-view **empty states**; overdue count shown in the browser **tab title**.
 
 ## The `/office` public page was REMOVED
 Everyone signs in now. `request.html` / `request.js` deleted and the Vercel
@@ -155,11 +159,11 @@ the schema but are unused/harmless.
   (`RESEND_API_KEY`, `EMAIL_FROM`). Called only by DB triggers holding
   `WEBHOOK_SECRET`. Secrets: VAPID_*, WEBHOOK_SECRET, RESEND_API_KEY.
 - `invite-user` — legacy service-role inviter, no longer called by the app.
-- **`parse-tasks`** — AI extraction: takes pasted text, calls the Anthropic
-  Messages API (raw HTTPS, server-side) and returns `{title,notes,due,priority}`
-  suggestions; extract-only, never writes. Verifies the caller's JWT. Deploy
-  `--no-verify-jwt`. Secrets: `ANTHROPIC_API_KEY`, optional `ANTHROPIC_MODEL`
-  (default `claude-opus-5`; `claude-haiku-4-5` recommended for cost). Frontend:
+- **`parse-tasks`** — AI extraction: takes pasted text, calls the **Google
+  Gemini** API (raw HTTPS, server-side, free tier) and returns
+  `{title,notes,due,priority}` suggestions; extract-only, never writes. Verifies
+  the caller's JWT. Deploy `--no-verify-jwt`. Secrets: `GEMINI_API_KEY`, optional
+  `GEMINI_MODEL` (default `gemini-2.0-flash`). Frontend:
   **✨ From text** button (topbar / mobile More sheet) → `#pasteOverlay` two-step
   review (`extractTasks`/`renderPasteRows`/`savePasteTasks`, `invokeFn`). Setup:
   `docs/PASTE-TO-TASKS.md`.

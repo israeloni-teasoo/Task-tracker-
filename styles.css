@@ -795,6 +795,15 @@ body {
   box-shadow: var(--shadow-md); z-index: 100; animation: rise .2s ease;
 }
 @keyframes rise { from { transform: translate(-50%, 10px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+.toast:has(.toast-action) { display: inline-flex; align-items: center; gap: 14px; padding-right: 8px; }
+.toast-action { border: none; background: transparent; color: #7ab8ff; font: inherit; font-weight: 700; cursor: pointer; padding: 4px 8px; border-radius: 7px; }
+.toast-action:hover { background: rgba(255,255,255,.12); }
+
+/* Inline quick-add row */
+.quick-add { display: flex; align-items: center; gap: 10px; background: var(--c-surface); border: 1px dashed var(--c-border); border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; }
+.quick-add .qa-plus { color: var(--c-text-faint); font-size: 16px; line-height: 1; flex: none; }
+.quick-add input { flex: 1; border: none; background: transparent; font: inherit; font-size: 14px; color: var(--c-text); outline: none; }
+.quick-add:focus-within { border-style: solid; border-color: var(--c-accent); }
 
 /* "Update available" banner */
 .update-banner {

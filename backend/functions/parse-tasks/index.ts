@@ -1,22 +1,21 @@
 // Supabase Edge Function: parse-tasks
 // Turns a blob of pasted text (notes, action items, a meeting summary) into a
-// structured list of task suggestions using the Anthropic API. The user reviews
-// and confirms them in the app before anything is saved — this function only
-// extracts, it never writes to the database.
+// structured list of task suggestions using the Google Gemini API (free tier).
+// The user reviews and confirms them in the app before anything is saved — this
+// function only extracts, it never writes to the database.
 //
 // Deploy with --no-verify-jwt (the shared Deploy Edge Function action does);
-// it authenticates the caller itself so only signed-in users can spend credits.
+// it authenticates the caller itself so only signed-in users can use it.
 //
-// Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (auto), ANTHROPIC_API_KEY,
-//   and optional ANTHROPIC_MODEL (default claude-opus-5; set claude-haiku-4-5
-//   for a much cheaper/faster extraction).
+// Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (auto), GEMINI_API_KEY,
+//   and optional GEMINI_MODEL (default gemini-2.0-flash).
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
-const MODEL = Deno.env.get("ANTHROPIC_MODEL") || "claude-opus-5";
+const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+const MODEL = Deno.env.get("GEMINI_MODEL") || "gemini-2.0-flash";
 
 const admin = createClient(SUPABASE_URL, SERVICE_KEY);
 
@@ -34,7 +33,7 @@ async function userId(req: Request): Promise<string | null> {
   return error || !data.user ? null : data.user.id;
 }
 
-const SYSTEM = `You extract actionable tasks from text a user pastes — meeting notes, action items, an email, or a summary. Return ONLY a JSON array (no prose, no code fences). Each element:
+const SYSTEM = `You extract actionable tasks from text a user pastes — meeting notes, action items, an email, or a summary. Return ONLY a JSON array (no prose). Each element:
 {"title": string (short, imperative), "notes": string ("" if none), "due": ISO 8601 datetime or null, "priority": "high"|"medium"|"low" or null}
 Rules:
 - One task per distinct action item. Ignore greetings, headings, and non-actionable context.
@@ -45,7 +44,7 @@ Rules:
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-  if (!ANTHROPIC_API_KEY) return json({ error: "not_configured", message: "Set the ANTHROPIC_API_KEY secret on this function." }, 400);
+  if (!GEMINI_API_KEY) return json({ error: "not_configured", message: "Set the GEMINI_API_KEY secret on this function." }, 400);
   const uid = await userId(req);
   if (!uid) return json({ error: "unauthorized" }, 401);
 
@@ -55,26 +54,20 @@ Deno.serve(async (req) => {
 
   const today = new Date().toISOString().slice(0, 10);
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
       method: "POST",
-      headers: {
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
+      headers: { "x-goog-api-key": GEMINI_API_KEY, "content-type": "application/json" },
       body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 4096,
-        output_config: { effort: "low" },
-        system: SYSTEM,
-        messages: [{ role: "user", content: `Today is ${today}.\n\nExtract tasks from:\n\n${text}` }],
+        systemInstruction: { parts: [{ text: SYSTEM }] },
+        contents: [{ role: "user", parts: [{ text: `Today is ${today}.\n\nExtract tasks from:\n\n${text}` }] }],
+        generationConfig: { responseMimeType: "application/json", temperature: 0.2, maxOutputTokens: 4096 },
       }),
     });
     const data = await res.json();
-    if (!res.ok) { console.error("anthropic error", data); return json({ error: "model_error", message: data?.error?.message || "The AI request failed." }, 502); }
-    if (data.stop_reason === "refusal") return json({ error: "refused", message: "The request was declined." }, 400);
+    if (!res.ok) { console.error("gemini error", data); return json({ error: "model_error", message: data?.error?.message || "The AI request failed." }, 502); }
+    if (data.promptFeedback?.blockReason) return json({ error: "blocked", message: "The request was blocked." }, 400);
 
-    const textOut = (data.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("").trim();
+    const textOut = (data.candidates?.[0]?.content?.parts || []).map((p: any) => p.text || "").join("").trim();
     let tasks: any[] = [];
     try {
       const jsonStr = textOut.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
@@ -82,7 +75,6 @@ Deno.serve(async (req) => {
     } catch (_) { return json({ error: "parse_failed", message: "Couldn't read the AI's response — try again." }, 502); }
     if (!Array.isArray(tasks)) tasks = [];
 
-    // Sanitise into a predictable shape for the client.
     const clean = tasks.slice(0, 50).map((t) => ({
       title: String(t?.title || "").slice(0, 300).trim(),
       notes: String(t?.notes || "").slice(0, 2000).trim(),
