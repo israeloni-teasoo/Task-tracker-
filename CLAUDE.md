@@ -163,7 +163,10 @@ the schema but are unused/harmless.
   Gemini** API (raw HTTPS, server-side, free tier) and returns
   `{title,notes,due,priority}` suggestions; extract-only, never writes. Verifies
   the caller's JWT. Deploy `--no-verify-jwt`. Secrets: `GEMINI_API_KEY`, optional
-  `GEMINI_MODEL` (default `gemini-2.0-flash`). Frontend:
+  `GEMINI_MODEL` (pins one model; unset = server tries a fallback chain of
+  current fast models — `gemini-flash-latest`, `gemini-3.6-flash`,
+  `gemini-2.5-flash` — with a transient-error retry, so a retired/overloaded
+  model can't break extraction). Frontend:
   **✨ From text** button (topbar / mobile More sheet) → `#pasteOverlay` two-step
   review (`extractTasks`/`renderPasteRows`/`savePasteTasks`, `invokeFn`). Setup:
   `docs/PASTE-TO-TASKS.md`.

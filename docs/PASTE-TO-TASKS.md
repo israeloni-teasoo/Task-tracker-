@@ -15,8 +15,10 @@ Uses **Google Gemini** (generous free tier) via the `parse-tasks` Edge Function.
 2. **Set it as a function secret** — Supabase dashboard → **Edge Functions →
    Secrets** (or `supabase secrets set`):
    - `GEMINI_API_KEY` = your key
-   - *(optional)* `GEMINI_MODEL` = `gemini-2.0-flash` (the default; a fast, free
-     model that's plenty for this extraction)
+   - *(optional)* `GEMINI_MODEL` = pin one model (e.g. `gemini-flash-latest`).
+     Leave it unset and the function tries a fallback chain of current fast
+     models (`gemini-flash-latest`, `gemini-3.6-flash`, `gemini-2.5-flash`),
+     so a single retired or overloaded model can't break extraction.
 3. **Deploy the function** — GitHub → **Actions → Deploy Edge Function → Run**
    with `function` = `parse-tasks`.
 

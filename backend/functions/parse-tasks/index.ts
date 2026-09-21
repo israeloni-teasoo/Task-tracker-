@@ -8,17 +8,53 @@
 // it authenticates the caller itself so only signed-in users can use it.
 //
 // Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (auto), GEMINI_API_KEY,
-//   and optional GEMINI_MODEL (default gemini-2.0-flash).
+//   and optional GEMINI_MODEL (pins a single model; unset = try a fallback
+//   chain of current models — see MODELS below).
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-// build: v4 (default model -> gemini-3.6-flash; diag accepts a model override)
+// build: v5 (resilient model fallback + transient retry; diag reports the
+// model that actually answered)
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
-const MODEL = Deno.env.get("GEMINI_MODEL") || "gemini-3.6-flash";
+// Candidate models tried in order. If GEMINI_MODEL is set it wins; otherwise we
+// try current names and fall through on "model not found/retired" (404) so a
+// single retired model (as happened with gemini-2.0-flash) can't break the
+// feature. Order: a stable alias first, then explicit current names.
+const MODELS = Deno.env.get("GEMINI_MODEL")
+  ? [Deno.env.get("GEMINI_MODEL")!]
+  : ["gemini-flash-latest", "gemini-3.6-flash", "gemini-2.5-flash"];
 
 const admin = createClient(SUPABASE_URL, SERVICE_KEY);
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Call Gemini generateContent, trying each candidate model in turn. Falls
+// through to the next model on a 404 (model not found/retired); retries the
+// same model once after a short delay on a transient 503/429. Returns the raw
+// Response + parsed JSON of the first model that answers (ok or a non-transient
+// error), plus which model was used.
+async function callGemini(payload: unknown, models = MODELS): Promise<{ res: Response; data: any; model: string }> {
+  let last: { res: Response; data: any; model: string } | null = null;
+  for (const model of models) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: "POST",
+        headers: { "x-goog-api-key": GEMINI_API_KEY!, "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      last = { res, data, model };
+      if (res.ok) return last;
+      if ((res.status === 503 || res.status === 429) && attempt === 0) { await sleep(900); continue; } // transient: retry same model once
+      break; // non-transient (or already retried): try the next model
+    }
+    if (last && (last.res.status === 404)) continue; // model retired/not found: next candidate
+    if (last && !last.res.ok && last.res.status !== 503 && last.res.status !== 429) break; // real error (e.g. bad key): stop
+  }
+  return last!;
+}
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -53,22 +89,18 @@ Deno.serve(async (req) => {
   // with the configured key+model actually succeeds. Never returns the key
   // value itself. Remove once paste-to-tasks is confirmed working.
   if (bodyIn && bodyIn.action === "diag") {
-    const testModel = (typeof bodyIn.model === "string" && bodyIn.model) || MODEL;
-    let gemini = "skipped (no key)";
+    const models = (typeof bodyIn.model === "string" && bodyIn.model) ? [bodyIn.model] : MODELS;
+    let gemini = "skipped (no key)", usedModel = models[0];
     if (GEMINI_API_KEY) {
       try {
-        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${testModel}:generateContent`, {
-          method: "POST",
-          headers: { "x-goog-api-key": GEMINI_API_KEY, "content-type": "application/json" },
-          body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "Reply with the word ok." }] }] }),
-        });
-        const d = await r.json().catch(() => ({}));
-        gemini = r.ok
-          ? "ok: " + ((d.candidates?.[0]?.content?.parts || []).map((p: any) => p.text || "").join("").trim() || "(empty)")
-          : `error ${r.status}: ${d?.error?.message || "unknown"}`;
+        const { res, data, model } = await callGemini({ contents: [{ role: "user", parts: [{ text: "Reply with the word ok." }] }] }, models);
+        usedModel = model;
+        gemini = res.ok
+          ? "ok: " + ((data.candidates?.[0]?.content?.parts || []).map((p: any) => p.text || "").join("").trim() || "(empty)")
+          : `error ${res.status}: ${data?.error?.message || "unknown"}`;
       } catch (e) { gemini = "fetch_failed: " + String((e as Error)?.message || e); }
     }
-    return json({ hasKey: !!GEMINI_API_KEY, model: testModel, gemini });
+    return json({ hasKey: !!GEMINI_API_KEY, candidates: models, model: usedModel, gemini });
   }
 
   if (!GEMINI_API_KEY) return json({ error: "not_configured", message: "Set the GEMINI_API_KEY secret on this function." }, 400);
@@ -81,16 +113,11 @@ Deno.serve(async (req) => {
 
   const today = new Date().toISOString().slice(0, 10);
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
-      method: "POST",
-      headers: { "x-goog-api-key": GEMINI_API_KEY, "content-type": "application/json" },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM }] },
-        contents: [{ role: "user", parts: [{ text: `Today is ${today}.\n\nExtract tasks from:\n\n${text}` }] }],
-        generationConfig: { responseMimeType: "application/json", temperature: 0.2, maxOutputTokens: 4096 },
-      }),
+    const { res, data } = await callGemini({
+      systemInstruction: { parts: [{ text: SYSTEM }] },
+      contents: [{ role: "user", parts: [{ text: `Today is ${today}.\n\nExtract tasks from:\n\n${text}` }] }],
+      generationConfig: { responseMimeType: "application/json", temperature: 0.2, maxOutputTokens: 4096 },
     });
-    const data = await res.json();
     if (!res.ok) { console.error("gemini error", data); return json({ error: "model_error", message: data?.error?.message || "The AI request failed." }, 502); }
     if (data.promptFeedback?.blockReason) return json({ error: "blocked", message: "The request was blocked." }, 400);
 
